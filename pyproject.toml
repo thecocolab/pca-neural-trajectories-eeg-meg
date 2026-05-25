@@ -9,9 +9,11 @@ description = "Tutorial for A Primer on Low-Dimensional Neural Dynamics: PCA-Bas
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "coco-pipe @ git+https://github.com/BabaSanfour/coco-pipe.git@dim_red_v3",
+    "coco-pipe @ git+https://github.com/BabaSanfour/coco-pipe.git@viz",
     "jupyterlab",
-    "ipywidgets"
+    "ipywidgets",
+    "mne"
+    "mne-icalabel"
 ]
 
 [tool.setuptools]
