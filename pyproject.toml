@@ -1,20 +1,60 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pca-neural-trajectories"
 version = "0.1.0"
-description = "Tutorial for A Primer on Low-Dimensional Neural Dynamics: PCA-Based Trajectory Analysis for EEG and MEG"
+description = "PCA neural-trajectory tutorials and analyses for EEG and MEG"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "coco-pipe @ git+https://github.com/BabaSanfour/coco-pipe.git@viz",
-    "jupyterlab",
+    "autoreject>=0.4",
+    "coco-pipe[eeg,decoding,neighbor]>=0.0.1",
     "ipywidgets",
-    "mne"
-    "mne-icalabel"
+    "jupyterlab",
+    "kaleido",
+    "mne>=1.9",
+    "mne-bids>=0.18",
+    "mne-icalabel",
+    "nbclient>=0.10",
+    "nbformat>=5.10",
+    "numpy>=2.0",
+    "openneuro-py>=2026.7.0",
+    "pandas",
+    "plotly",
+    "scipy>=1.11",
 ]
 
-[tool.setuptools]
-py-modules = ["run_tutorial"]
+[project.optional-dependencies]
+meg = [
+    "mne-bids-pipeline",
+]
+test = [
+    "pytest>=8",
+    "pytest-cov",
+]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pca_neural_trajectories*"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+markers = [
+    "real_data: requires downloaded EEG or MEG data and is excluded from CI",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

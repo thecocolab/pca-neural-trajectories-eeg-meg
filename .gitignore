@@ -5,3 +5,6 @@ outputs/
 PhysioNet_EEGBCI/
 .ipynb_checkpoints/
 *.egg-info/
+build/
+dist/
+tutorials/data/
