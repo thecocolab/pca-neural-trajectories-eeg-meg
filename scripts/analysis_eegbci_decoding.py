@@ -1,20 +1,28 @@
 """Run and save the complete cross-participant EEGBCI decoding analysis.
 
 This is the headless companion to
-``tutorials/tutorial_eegbci_decoding.ipynb``. It mirrors the notebook's
-data selection, leave-one-subject-out splits, fold-local scaling, sliding
-logistic regression, transductive temporal alignment, summaries, figures, and
-structured ten-step report.
+``tutorials/tutorial_eegbci_decoding.ipynb``. It mirrors the MEG-faces
+decoding script's design: leave-one-subject-out splits, fold-local scaling,
+sliding logistic regression, a configurable target (``--conditions``; two ids
+give binary decoding, more give multiclass), five representations (raw
+sensors, a shared fold-local PCA with no per-subject rotation, an unaligned
+per-participant PCA control, and temporally-aligned per-subject PCA at two
+component counts), and three validations of any alignment gain (a
+within-participant k-fold upper bound, the geometry of the rotation itself, and
+a calibration-only alignment variant).
 
 Examples
 --------
 python scripts/analysis_eegbci_decoding.py
 python scripts/analysis_eegbci_decoding.py --subjects 1 2 3 --n-jobs 1
+python scripts/analysis_eegbci_decoding.py --conditions 5 6  # left vs right, imagery
+python scripts/analysis_eegbci_decoding.py --conditions 3 4 5 6  # 4-class
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import warnings
 from pathlib import Path
 
@@ -22,20 +30,29 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from coco_pipe.decoding import (
+    ChanceAssessmentConfig,
     CVConfig,
     Experiment,
     ExperimentConfig,
+    ReducerConfig,
+    StatisticalAssessmentConfig,
     TemporalAlignmentConfig,
     TemporalDecoderConfig,
 )
 from coco_pipe.decoding.configs import ClassicalModelConfig
+from coco_pipe.decoding.stats import run_paired_permutation_assessment
 from coco_pipe.report import PlotlyElement, Report, Section
 from coco_pipe.report.elements import (
     AccordionElement,
     InteractiveTableElement,
     MarkdownElement,
 )
-from coco_pipe.viz.interactive.decoding import plot_temporal_score_curve
+from coco_pipe.transforms import TemporalProcrustesAlignment
+from coco_pipe.viz.interactive import plot_group_scatter_with_mean
+from coco_pipe.viz.interactive.decoding import (
+    plot_temporal_score_curve,
+    plot_temporal_statistical_assessment,
+)
 from coco_pipe.viz.theme import set_coco_theme
 from plotly.subplots import make_subplots
 
@@ -47,14 +64,142 @@ from pca_neural_trajectories import (
 )
 
 SEED = 42
-CONDITIONS = (3, 4)
+DEFAULT_CONDITIONS = (3, 4)
 ANALYSIS_WINDOW = (-0.2, 1.0)
-CHANCE_LEVEL = 0.5
 EXCLUDED_SUBJECTS = {88, 92, 100}
-REPRESENTATION_COLORS = {
-    "Sensors": "#1b9e77",
-    "Aligned PCA": "#2a78d6",
-}
+# Positional palette for the five representations, in the order they are built
+# (Sensors, Shared PCA, Unaligned PCA, small Aligned PCA, large Aligned PCA) —
+# the exact labels are dynamic (they embed the configured component counts).
+REPRESENTATION_PALETTE = ("#1b9e77", "#e6ab02", "#d95f02", "#7570b3", "#2a78d6")
+CALIBRATION_COLOR = "#c51b7d"
+WITHIN_SUBJECT_COLOR = "#444444"
+# Trials per participant used for the descriptive alignment-geometry table. The
+# rotation is estimated from a grand-mean path, which is stable well below the
+# full trial count, so this keeps an O(participants^2) diagnostic affordable.
+GEOMETRY_MAX_TRIALS = 200
+
+
+def _completed(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("status") == "complete"
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def _slug(name: str) -> str:
+    """Filesystem-safe stem for a representation label."""
+    return "".join(
+        character if character.isalnum() else "_" for character in name.lower()
+    ).strip("_")
+
+
+def _within_subject_upper_bound(
+    *,
+    X: np.ndarray,
+    y: np.ndarray,
+    trial_ids: np.ndarray,
+    subject_ids: np.ndarray,
+    times: np.ndarray,
+    base_config: ExperimentConfig,
+    n_splits: int,
+    seed: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Decode each participant against themselves with stratified k-fold CV.
+
+    LOSO asks a harder question than the classifier's own capacity: it has to
+    transfer across heads. Repeating the identical sliding decoder inside each
+    participant separates "the signal is weak" from "the signal does not
+    transfer", and gives every LOSO curve a ceiling to be read against.
+
+    Returns the per-participant time courses and the group-mean curve.
+    """
+    config = base_config.model_copy(deep=True)
+    config.cv = CVConfig(
+        strategy="stratified", n_splits=n_splits, shuffle=True, random_state=seed
+    )
+    frames = []
+    for subject in sorted(np.unique(subject_ids)):
+        rows = subject_ids == subject
+        _, counts = np.unique(y[rows], return_counts=True)
+        if len(counts) < 2 or counts.min() < n_splits:
+            warnings.warn(
+                f"Participant {subject} has too few trials in one class for "
+                f"{n_splits}-fold within-participant CV; skipping.",
+                stacklevel=2,
+            )
+            continue
+        result = Experiment(config).run(
+            X[rows],
+            y[rows],
+            sample_ids=trial_ids[rows],
+            observation_level="epoch",
+            time_axis=times,
+        )
+        curve = result.get_temporal_score_summary()
+        curve["subject"] = subject
+        frames.append(curve)
+
+    per_subject = pd.concat(frames, ignore_index=True)
+    per_subject = per_subject[per_subject["Metric"] == "balanced_accuracy"]
+    group_curve = (
+        per_subject.groupby("Time")["Mean"].agg(["mean", "std", "count"]).reset_index()
+    )
+    group_curve["Model"] = "Within participant (sensors)"
+    group_curve["Metric"] = "balanced_accuracy"
+    group_curve["Mean"] = group_curve["mean"]
+    group_curve["Std"] = group_curve["std"].fillna(0.0) / np.sqrt(
+        group_curve["count"].clip(lower=1)
+    )
+    return per_subject, group_curve[["Model", "Metric", "Time", "Mean", "Std"]]
+
+
+def _alignment_geometry(
+    *,
+    X: np.ndarray,
+    subject_ids: np.ndarray,
+    n_components: int,
+    seed: int,
+    max_trials: int = GEOMETRY_MAX_TRIALS,
+) -> pd.DataFrame:
+    """Describe how far each participant's mean path had to rotate to match.
+
+    The decoder only reports whether alignment helped. This refits the alignment
+    itself on every LOSO fold and reads out its geometry: how much the
+    participant's grand-mean trajectory already resembled the training template,
+    how much of that gap the Procrustes rotation closed, and how large a rotation
+    that took. The held-out participant is the row of interest — their mapping is
+    the one estimated without any labels.
+    """
+    rng = np.random.default_rng(seed)
+    keep = []
+    for subject in np.unique(subject_ids):
+        rows = np.flatnonzero(subject_ids == subject)
+        if len(rows) > max_trials:
+            rows = rng.choice(rows, size=max_trials, replace=False)
+        keep.append(rows)
+    keep = np.sort(np.concatenate(keep))
+    X, subject_ids = X[keep], subject_ids[keep]
+
+    records = []
+    for held_out in sorted(np.unique(subject_ids)):
+        train = subject_ids != held_out
+        aligner = TemporalProcrustesAlignment(
+            n_components=n_components, random_state=seed
+        )
+        aligner.fit(X[train], groups=subject_ids[train])
+        aligner.transform(X[~train], groups=subject_ids[~train])
+        for subject, diagnostics in aligner.alignment_diagnostics_.items():
+            records.append(
+                {
+                    "held_out_subject": held_out,
+                    "subject": subject,
+                    "role": "held out" if subject == held_out else "training",
+                    **diagnostics,
+                }
+            )
+    return pd.DataFrame(records).drop(columns=["seen_in_training"])
 
 
 def build_decoding_report(
@@ -63,8 +208,15 @@ def build_decoding_report(
     context: dict[str, object],
     tables: dict[str, pd.DataFrame],
     figures: dict[str, go.Figure],
+    target_names: list[str],
+    representation_names: list[str],
 ) -> str:
     """Build the notebook-equivalent structured decoding report."""
+    target_text = " versus ".join(target_names)
+    target_mapping_text = ", ".join(
+        f"`{index} = {name}`" for index, name in enumerate(target_names)
+    )
+    representations_text = ", ".join(representation_names)
     title = (
         "EEGBCI — Cross-Participant Temporal Decoding "
         f"({context['n_subjects']} participants)"
@@ -84,9 +236,9 @@ def build_decoding_report(
     overview = Section("Overview", icon="O")
     overview.add_element(
         MarkdownElement(
-            "This report follows the complete **10-step cross-participant EEGBCI "
+            "This report follows the complete **12-step cross-participant EEGBCI "
             "decoding workflow** from the tutorial notebook. It asks whether "
-            "left- versus right-hand execution can be decoded in a participant who "
+            f"{target_text} can be decoded in a participant who "
             "contributed no labeled trials to model training.\n\n"
             "| Parameter | Value |\n"
             "|---|---|\n"
@@ -96,14 +248,16 @@ def build_decoding_report(
             f"{context['n_times']} |\n"
             f"| Analysis window | {context['time_start']:.3f}–"
             f"{context['time_stop']:.3f} s |\n"
-            "| Target | Left-hand versus right-hand execution |\n"
+            f"| Target | {target_text} |\n"
             "| Cross-validation | Leave one participant out |\n"
             "| Classifier | Sliding logistic regression |\n"
             "| Metric | Balanced accuracy |\n"
-            f"| Chance level | {context['chance_level']:.2f} |\n"
-            f"| Alignment components | {context['n_components']} |\n\n"
-            "> The two representations use identical trials, folds, classifier, "
-            "scaling, metric, and time axis. Only fold-local temporal alignment differs."
+            f"| Chance level | {context['chance_level']:.3f} |\n"
+            f"| Representations | {representations_text} |\n"
+            f"| PCA components | {context['small_n_components']} and "
+            f"{context['n_components']} |\n\n"
+            "> All representations use identical trials, folds, classifier, "
+            "scaling, metric, and time axis. Only the fold-local feature space differs."
         )
     )
     report.add_section(overview)
@@ -112,8 +266,8 @@ def build_decoding_report(
     step1.add_element(
         MarkdownElement(
             "The predictive question is deliberately narrower than visual trajectory "
-            "separation: **can a classifier trained on other participants identify "
-            "left- versus right-hand execution in one entirely held-out participant?**\n\n"
+            f"separation: **can a classifier trained on other participants identify "
+            f"{target_text} in one entirely held-out participant?**\n\n"
             "A trial is an observation, but the participant is the inferential unit. "
             "Repeated trials from one participant are correlated and cannot be split "
             "independently across training and test sets.\n\n"
@@ -132,7 +286,7 @@ def build_decoding_report(
             "`coco-pipe` accepts the native three-dimensional temporal array.\n\n"
             "The crop and baseline match the notebook: −0.2–1.0 s around the movement "
             "cue, with the pre-cue −0.2–0.0 s interval used as the sensor baseline. "
-            "Labels 3 and 4 correspond to left- and right-hand execution."
+            f"The decoded target is {target_text}."
         )
     )
     step2.add_element(
@@ -147,7 +301,7 @@ def build_decoding_report(
     step3 = Section("Step 3 — Verify the Target and Class Balance", icon="3")
     step3.add_element(
         MarkdownElement(
-            "The target is encoded as `0 = left hand` and `1 = right hand`. Balanced "
+            f"The target is encoded as {target_mapping_text}. Balanced "
             "accuracy is used because it averages sensitivity across classes and is "
             "therefore robust to modest trial-count differences. The logistic "
             "regression also receives `class_weight='balanced'`, fitted using the "
@@ -195,17 +349,22 @@ def build_decoding_report(
     )
     report.add_section(step5)
 
-    step6 = Section("Step 6 — Compare Sensors with Aligned PCA", icon="6")
+    step6 = Section("Step 6 — Compare Representations", icon="6")
     step6.add_element(
         MarkdownElement(
-            "The **Sensors** experiment decodes directly from channels. The "
-            "**Aligned PCA** experiment enables `TemporalProcrustesAlignment` within "
-            "each outer fold while leaving every other setting unchanged.\n\n"
-            "For alignment, the shared PCA reference and temporal template are learned "
-            "from training participants only. The unseen participant's unlabeled trials "
-            "are used to estimate that participant's PCA and orthogonal rotation into "
-            "the training reference. Labels from the held-out participant are never "
-            "used during adaptation.\n\n"
+            f"Five representations are compared ({representations_text}), all fed "
+            "into the identical sliding logistic regression. **Sensors** decodes "
+            "directly from channels. **Shared PCA** fits a single fold-local PCA on "
+            "the pooled training participants (`coco-pipe`'s `ReducerConfig`) and "
+            "applies it unchanged to every participant — no per-subject basis, no "
+            "rotation. **Unaligned PCA** fits a separate PCA per participant and "
+            "stops there. **Aligned PCA** (at two component counts) does the same and "
+            "then Procrustes-rotates each participant's own basis onto a "
+            "training-only shared temporal template.\n\n"
+            "Unaligned PCA is the control that makes the comparison interpretable: it "
+            "differs from Aligned PCA by the rotation and by nothing else, so any "
+            "difference between them is attributable to the rotation rather than to "
+            "the fact of having a participant-specific basis.\n\n"
             "> **Transductive scope:** Aligned performance answers what is possible "
             "after collecting an unlabeled calibration batch from the new participant. "
             "It is not zero-calibration inductive decoding and should not be presented "
@@ -217,7 +376,7 @@ def build_decoding_report(
     step7 = Section("Step 7 — Run and Audit Every Fold", icon="7")
     step7.add_element(
         MarkdownElement(
-            "Both experiments receive the same native epochs, binary labels, "
+            "All four experiments receive the same native epochs, labels, "
             "participant groups, trial identifiers, and scientific time axis. The raw "
             "`ExperimentResult` for each representation is preserved, including "
             "predictions, splits, fold scores, and fit diagnostics.\n\n"
@@ -244,7 +403,8 @@ def build_decoding_report(
         MarkdownElement(
             "The curve is the mean balanced accuracy across held-out participants; "
             "the ribbon is the fold-level standard deviation returned by `coco-pipe`. "
-            "The horizontal line marks binary chance (0.5), and time zero marks the "
+            f"The horizontal line marks chance ({1 / len(target_names):.3f} for "
+            f"{len(target_names)}-way decoding), and time zero marks the "
             "movement cue.\n\n"
             "Peak latency and accuracy summarize the plotted curve but do not provide "
             "a multiple-comparison-corrected inferential test. Broad, sustained "
@@ -260,6 +420,16 @@ def build_decoding_report(
             selector_columns=["Representation"],
         )
     )
+    step8.add_element(
+        MarkdownElement(
+            "The gain-through-time curve below re-expresses the same folds as a "
+            "paired difference against Sensors at every latency — mean and SEM "
+            "across held-out participants of `(representation - Sensors)` "
+            "balanced accuracy. A curve sitting above zero is a sustained "
+            "enhancement over raw sensors at that latency; below zero is a cost."
+        )
+    )
+    step8.add_element(PlotlyElement(figures["gain_through_time"], height="500px"))
     report.add_section(step8)
 
     step9 = Section("Step 9 — Examine Held-Out-Participant Variability", icon="9")
@@ -267,17 +437,18 @@ def build_decoding_report(
         MarkdownElement(
             "A mean curve can hide participants with very different decoding profiles. "
             "The heatmaps retain one row per LOSO fold, labelled by the held-out "
-            "participant. The companion distribution plot summarizes two predeclared "
-            "post-cue quantities per fold:\n\n"
+            "participant, one panel per representation. The companion distribution "
+            "plot summarizes two predeclared post-cue quantities per fold:\n\n"
             "- **Post-cue mean balanced accuracy:** average performance from 0–1 s.\n"
-            "- **AUC above chance:** temporal integral of `(balanced accuracy − 0.5)` "
-            "over the same interval.\n\n"
-            "Aligned-minus-sensor differences are paired by outer fold. They are "
-            "descriptive sensitivity summaries, not significance tests."
+            "- **AUC above chance:** temporal integral of `(balanced accuracy − "
+            "chance)` over the same interval.\n\n"
+            "Representation-minus-Sensors differences are paired by outer fold. They "
+            "are descriptive sensitivity summaries, not significance tests."
         )
     )
     step9.add_element(PlotlyElement(figures["fold_heatmaps"], height="720px"))
     step9.add_element(PlotlyElement(figures["fold_summaries"], height="520px"))
+    step9.add_element(PlotlyElement(figures["representation_comparison"], height="540px"))
     step9.add_element(
         InteractiveTableElement(
             tables["representation_summary"],
@@ -288,19 +459,108 @@ def build_decoding_report(
     step9.add_element(
         InteractiveTableElement(
             tables["paired_fold_differences"],
-            title="Aligned PCA minus Sensors within each held-out participant",
+            title="Each representation minus Sensors, within each held-out participant",
             selector_columns=["held_out_subject"],
         )
     )
     report.add_section(step9)
 
-    step10 = Section("Step 10 — Export, Reproduce & Interpret", icon="10")
+    step10 = Section("Step 10 — Statistical Significance", icon="10")
+    step10.add_element(
+        MarkdownElement(
+            "Each representation is compared against Sensors, and the large "
+            "Aligned PCA additionally against Shared PCA (does a "
+            "participant-specific basis add anything?) and against Unaligned PCA "
+            "(is it the rotation, or merely the basis?), with a **paired "
+            f"permutation test** ({context['n_permutations']} shuffles): within "
+            "each held-out participant, predictions from the two representations "
+            "are randomly swapped, and the observed balanced-accuracy difference "
+            "is compared to that null. `max_stat` multiple-comparison correction "
+            "takes the maximum of the null distribution across all latencies, so "
+            "a single corrected p-value protects the whole time course. This test "
+            "costs no extra model fits: it reuses the already-fitted predictions "
+            "above.\n\n"
+            "> A black square marks a latency where the corrected p-value clears "
+            "the significance threshold. The shaded band is the permutation null."
+        )
+    )
+    for key, figure in figures.items():
+        if key.startswith("significance_"):
+            step10.add_element(PlotlyElement(figure, height="450px"))
+    step10.add_element(
+        InteractiveTableElement(
+            tables["significance_summary"],
+            title="Significance at each comparison's peak observed difference",
+            selector_columns=["Representation", "Baseline"],
+        )
+    )
+    report.add_section(step10)
+
+    step11 = Section("Step 11 — Bound the Alignment Result", icon="11")
+    step11.add_element(
+        MarkdownElement(
+            "Three checks bound what any alignment gain can mean.\n\n"
+            "**The within-participant ceiling.** The same sliding decoder is "
+            f"refitted inside each participant with {context['within_subject_splits']}-fold "
+            "stratified cross-validation, so no head-to-head transfer is required. "
+            "The distance between that curve and the LOSO Sensors curve is the cost "
+            "of generalizing across participants rather than the weakness of the "
+            "signal itself, and it is the ceiling any representation is working "
+            "toward."
+        )
+    )
+    step11.add_element(PlotlyElement(figures["within_subject_upper_bound"], height="500px"))
+    step11.add_element(
+        InteractiveTableElement(
+            tables["within_subject_peaks"],
+            title="Within-participant peak balanced accuracy",
+        )
+    )
+    step11.add_element(
+        MarkdownElement(
+            "**What the rotation does geometrically.** The alignment is refitted on "
+            "every fold and read out directly, without a classifier. Each point is "
+            "one held-out participant: the normalized agreement between their "
+            "grand-mean trajectory and the training template, before and after the "
+            "Procrustes rotation. A large rise means their principal axes pointed "
+            "somewhere idiosyncratic and the rotation recovered the correspondence; "
+            "a flat pair means alignment had little to work with. "
+            f"Computed on up to {context['geometry_max_trials']} trials per "
+            "participant, since the grand-mean path is stable well below the full "
+            "trial count."
+        )
+    )
+    step11.add_element(PlotlyElement(figures["alignment_geometry"], height="480px"))
+    step11.add_element(
+        InteractiveTableElement(
+            tables["alignment_geometry"],
+            title="Per-fold alignment geometry",
+            selector_columns=["held_out_subject", "role"],
+        )
+    )
+    step11.add_element(
+        MarkdownElement(
+            "**Is the gain just transduction?** Transductive alignment estimates the "
+            "held-out participant's rotation from all of their (unlabeled) trials — "
+            "including the very trials it is then scored on. The calibration variant "
+            "removes that: each half of the held-out participant's trials is mapped "
+            "using the PCA and rotation estimated from the *other* half, so no trial "
+            "informs the mapping applied to it. If the transductive and calibration "
+            "curves agree, the gain is domain adaptation from unlabeled data, not "
+            "leakage. If the calibration curve collapses to Shared PCA, it was the "
+            "transduction."
+        )
+    )
+    step11.add_element(PlotlyElement(figures["calibration_alignment"], height="500px"))
+    report.add_section(step11)
+
+    step12 = Section("Step 12 — Export, Reproduce & Interpret", icon="12")
     static_status = (
         "PNG and SVG exports completed."
         if context["static_exports_complete"]
         else "Static export was unavailable; interactive HTML figures are complete."
     )
-    step10.add_element(
+    step12.add_element(
         MarkdownElement(
             "The output bundle preserves the summary tables, fold-level scores, split "
             "audit, fit diagnostics, raw `ExperimentResult` objects and tidy exports, "
@@ -313,7 +573,7 @@ def build_decoding_report(
             "3. Sensor and aligned spaces answer different calibration questions.\n"
             "4. Transductive alignment uses unlabeled held-out-participant data and must "
             "not be described as zero-calibration decoding.\n\n"
-            "> **Main takeaway:** Compare the two representations through paired "
+            "> **Main takeaway:** Compare the representations through paired "
             "held-out-participant behavior and sustained temporal performance, not "
             "through a single maximum of the group-mean curve."
         )
@@ -323,8 +583,8 @@ def build_decoding_report(
         appendix.add_element(
             InteractiveTableElement(table, title=name.replace("_", " ").title())
         )
-    step10.add_element(appendix)
-    report.add_section(step10)
+    step12.add_element(appendix)
+    report.add_section(step12)
 
     report.save(str(output / "report.html"))
     return asset_mode
@@ -336,18 +596,46 @@ def run_decoding_analysis(
     bids_root: Path,
     output: Path,
     n_components: int = 30,
+    small_n_components: int = 3,
+    n_permutations: int = 200,
+    within_subject_splits: int = 5,
     n_jobs: int = -1,
     seed: int = SEED,
     prepare: bool = False,
+    conditions: tuple[int, ...] = DEFAULT_CONDITIONS,
 ) -> dict[str, object]:
-    """Run the notebook-equivalent decoding analysis and save every output."""
+    """Run the notebook-equivalent decoding analysis and save every output.
+
+    ``conditions`` selects and orders the condition_ids to decode (from
+    :data:`LABEL_NAMES`). Two conditions give binary decoding (as in the
+    tutorial's left-vs-right execution default); more give multiclass. Class
+    index ``i`` in the target always corresponds to ``conditions[i]``, and
+    chance level is ``1 / len(conditions)``.
+
+    Five representations are compared: raw ``Sensors``; ``Shared PCA``, a
+    fold-local PCA fit once on the pooled training participants with no
+    per-subject rotation (``coco_pipe``'s ``ReducerConfig``); ``Unaligned PCA``,
+    a per-participant PCA with the Procrustes step switched off; and temporally
+    Procrustes-aligned per-subject PCA (``TemporalAlignmentConfig``) at
+    ``small_n_components`` and ``n_components``.
+
+    Three validations follow: a within-participant ``within_subject_splits``-fold
+    upper bound, the geometry of the rotation on every fold, and a
+    calibration-half (non-transductive) alignment variant.
+    """
     if len(subjects_requested) < 2:
         raise ValueError("Cross-participant decoding requires at least two subjects.")
     invalid = sorted(set(subjects_requested) & EXCLUDED_SUBJECTS)
     if invalid:
         raise ValueError(f"Subjects with incompatible sampling rates requested: {invalid}.")
-    if n_components < 1:
-        raise ValueError("n_components must be positive.")
+    if n_components < 1 or small_n_components < 1:
+        raise ValueError("n_components and small_n_components must be positive.")
+    conditions = tuple(conditions)
+    if len(set(conditions)) < 2:
+        raise ValueError("conditions must name at least two distinct condition ids.")
+    chance_level = 1.0 / len(conditions)
+    target_names = [LABEL_NAMES[condition_id] for condition_id in conditions]
+    target_mapping = {str(index): name for index, name in enumerate(target_names)}
 
     set_coco_theme(mode="paper", colorblind=True)
     output = Path(output)
@@ -373,7 +661,7 @@ def run_decoding_analysis(
         bids_root,
         subjects=requested_ids,
         runs=tuple(range(3, 15)),
-        conditions=CONDITIONS,
+        conditions=conditions,
         tmin=ANALYSIS_WINDOW[0],
         tmax=ANALYSIS_WINDOW[1],
         baseline=(-0.2, 0.0),
@@ -383,7 +671,8 @@ def run_decoding_analysis(
     condition = np.asarray(container.y, dtype=int)
     subject_ids = np.asarray(container.coords["subject"]).astype(str)
     trial_ids = np.asarray(container.ids).astype(str)
-    y = np.where(condition == CONDITIONS[0], 0, 1)
+    condition_to_class = {condition_id: index for index, condition_id in enumerate(conditions)}
+    y = np.array([condition_to_class[value] for value in condition])
 
     if n_components > X.shape[1]:
         raise ValueError(
@@ -425,22 +714,63 @@ def run_decoding_analysis(
         n_jobs=n_jobs,
         verbose=False,
     )
-    aligned_config = sensor_config.model_copy(deep=True)
-    aligned_config.temporal_alignment = TemporalAlignmentConfig(
+    shared_pca_config = sensor_config.model_copy(deep=True)
+    shared_pca_config.reducer = ReducerConfig(enabled=True, n_components=n_components)
+
+    # The control that isolates the rotation: an identical per-participant PCA,
+    # with the Procrustes step switched off.
+    unaligned_config = sensor_config.model_copy(deep=True)
+    unaligned_config.temporal_alignment = TemporalAlignmentConfig(
+        enabled=True,
+        n_components=n_components,
+        adaptation="transductive",
+        rotate=False,
+    )
+
+    aligned_small_config = sensor_config.model_copy(deep=True)
+    aligned_small_config.temporal_alignment = TemporalAlignmentConfig(
+        enabled=True,
+        n_components=small_n_components,
+        adaptation="transductive",
+    )
+
+    aligned_large_config = sensor_config.model_copy(deep=True)
+    aligned_large_config.temporal_alignment = TemporalAlignmentConfig(
         enabled=True,
         n_components=n_components,
         adaptation="transductive",
     )
+    shared_pca_name = f"Shared PCA ({n_components})"
+    unaligned_name = f"Unaligned PCA ({n_components}C)"
+    aligned_small_name = f"Aligned PCA ({small_n_components}C)"
+    aligned_large_name = f"Aligned PCA ({n_components}C)"
     experiments = {
         "Sensors": sensor_config,
-        "Aligned PCA": aligned_config,
+        shared_pca_name: shared_pca_config,
+        unaligned_name: unaligned_config,
+        aligned_small_name: aligned_small_config,
+        aligned_large_name: aligned_large_config,
     }
+    representation_colors = dict(zip(experiments.keys(), REPRESENTATION_PALETTE))
+
+    # Validation variant, reported separately from the five representations
+    # above: the same alignment, but each held-out participant's rotation is
+    # estimated from one half of their trials and applied to the other half.
+    calibration_name = f"Aligned PCA ({n_components}C, calibration)"
+    calibration_config = sensor_config.model_copy(deep=True)
+    calibration_config.temporal_alignment = TemporalAlignmentConfig(
+        enabled=True,
+        n_components=n_components,
+        adaptation="calibration",
+    )
+    representation_colors[calibration_name] = CALIBRATION_COLOR
+
 
     results = {}
     temporal_frames = []
     fold_frames = []
     diagnostic_frames = []
-    for representation, config in experiments.items():
+    for representation, config in {**experiments, calibration_name: calibration_config}.items():
         result = Experiment(config).run(
             X,
             y,
@@ -469,7 +799,7 @@ def run_decoding_analysis(
         diagnostic_frames.append(diagnostics)
 
         result.export(
-            results_dir / representation.lower().replace(" ", "_"),
+            results_dir / _slug(representation),
             config=config.model_dump(),
             formats=("csv",),
         )
@@ -477,6 +807,64 @@ def run_decoding_analysis(
     temporal_scores = pd.concat(temporal_frames, ignore_index=True)
     fold_scores = pd.concat(fold_frames, ignore_index=True)
     fit_diagnostics = pd.concat(diagnostic_frames, ignore_index=True)
+    representation_names = list(experiments)
+    other_representations = [name for name in representation_names if name != "Sensors"]
+
+    # Paired permutation significance, at every latency: is each representation's
+    # balanced accuracy different from Sensors, and (for the headline aligned
+    # variant) from Shared PCA — the two questions FINDINGS.md's original EEG
+    # validation answered. This swaps whole held-out-participant predictions
+    # between the two already-fitted experiments, so it costs no extra model
+    # fits — cheap even at n_permutations=200.
+    # `n_bootstraps` sets the confidence interval's resampling budget and
+    # `n_permutations` the p-value's; tying them keeps a reduced smoke run cheap
+    # on both, since the bootstrap otherwise dominates at 1000 resamples.
+    stats_config = StatisticalAssessmentConfig(
+        chance=ChanceAssessmentConfig(
+            n_permutations=n_permutations,
+            temporal_correction="max_stat",
+        ),
+        n_bootstraps=n_permutations,
+        unit_of_inference="group_mean",
+        random_state=seed,
+        n_jobs=n_jobs,
+    )
+    comparison_pairs = [
+        *((representation, "Sensors") for representation in other_representations),
+        (aligned_large_name, shared_pca_name),
+        (aligned_large_name, unaligned_name),
+        (calibration_name, shared_pca_name),
+    ]
+
+    significance_frames = []
+    significance_figures = {}
+    for representation, baseline in comparison_pairs:
+        comparison = run_paired_permutation_assessment(
+            results[representation],
+            results[baseline],
+            "Logistic regression",
+            "balanced_accuracy",
+            stats_config,
+        )
+        comparison["Representation"] = representation
+        comparison["Baseline"] = baseline
+        significance_frames.append(comparison)
+        figure_key = f"{representation} vs {baseline}"
+        significance_figures[figure_key] = plot_temporal_statistical_assessment(
+            comparison,
+            title=(
+                f"{figure_key}: paired permutation test "
+                f"({n_permutations} shuffles, max-stat corrected)"
+            ),
+        )
+    significance_assessment = pd.concat(significance_frames, ignore_index=True)
+    significance_summary = (
+        significance_assessment.loc[
+            significance_assessment.groupby(["Representation", "Baseline"])["Observed"].idxmax()
+        ]
+        .reset_index(drop=True)
+        .rename(columns={"Observed": "peak_observed_diff"})
+    )
 
     split_rows = results["Sensors"].get_splits()
     audit_records = []
@@ -538,7 +926,7 @@ def run_decoding_analysis(
                 "postcue_mean_balanced_accuracy": float(active_rows["Value"].mean()),
                 "postcue_auc_above_chance": float(
                     np.trapezoid(
-                        active_rows["Value"] - CHANCE_LEVEL,
+                        active_rows["Value"] - chance_level,
                         active_rows["Time"],
                     )
                 ),
@@ -574,19 +962,20 @@ def run_decoding_analysis(
         "postcue_mean_balanced_accuracy",
         "postcue_auc_above_chance",
     ):
-        paired_fold_differences[f"{metric}_aligned_minus_sensors"] = (
-            paired[(metric, "Aligned PCA")].to_numpy()
-            - paired[(metric, "Sensors")].to_numpy()
-        )
+        for representation in other_representations:
+            paired_fold_differences[f"{metric}_{_slug(representation)}_minus_sensors"] = (
+                paired[(metric, representation)].to_numpy()
+                - paired[(metric, "Sensors")].to_numpy()
+            )
 
     temporal_figure = plot_temporal_score_curve(
-        temporal_scores,
+        temporal_scores[temporal_scores["Representation"].isin(representation_names)],
         metric="balanced_accuracy",
-        title="Left- versus right-hand execution: LOSO decoding",
-        colors=REPRESENTATION_COLORS,
+        title=f"{' versus '.join(target_names)}: LOSO decoding",
+        colors=representation_colors,
     )
     temporal_figure.add_hline(
-        y=CHANCE_LEVEL,
+        y=chance_level,
         line_dash="dot",
         line_color="#777777",
     )
@@ -594,13 +983,44 @@ def run_decoding_analysis(
     temporal_figure.update_yaxes(title_text="balanced accuracy")
     temporal_figure.update_xaxes(title_text="time from movement cue (s)")
 
+    n_representations = len(representation_names)
+
+    # Gain-through-time: (representation - Sensors) balanced accuracy, paired by
+    # held-out fold at every timepoint, then averaged across folds. Unlike the
+    # peak/post-cue point summaries above, this keeps the full time course of
+    # the enhancement (or cost) relative to raw sensors.
+    wide_scores = metric_rows.pivot_table(
+        index=["Fold", "Time"], columns="Representation", values="Value"
+    )
+    gain_frames = []
+    for representation in other_representations:
+        gain = (wide_scores[representation] - wide_scores["Sensors"]).rename("Value")
+        gain = gain.reset_index()
+        summary = gain.groupby("Time")["Value"].agg(["mean", "std", "count"]).reset_index()
+        summary["Model"] = representation
+        summary["Metric"] = "balanced_accuracy_gain"
+        summary["Mean"] = summary["mean"]
+        summary["Std"] = summary["std"].fillna(0.0) / np.sqrt(summary["count"].clip(lower=1))
+        gain_frames.append(summary[["Model", "Metric", "Time", "Mean", "Std"]])
+    gain_through_time = pd.concat(gain_frames, ignore_index=True)
+    gain_through_time_figure = plot_temporal_score_curve(
+        gain_through_time,
+        metric="balanced_accuracy_gain",
+        title="Gain through time: representation minus Sensors (paired by held-out participant)",
+        colors=representation_colors,
+    )
+    gain_through_time_figure.add_hline(y=0.0, line_dash="dot", line_color="#777777")
+    gain_through_time_figure.add_vline(x=0, line_color="#999999")
+    gain_through_time_figure.update_yaxes(title_text="balanced accuracy gain over Sensors")
+    gain_through_time_figure.update_xaxes(title_text="time from movement cue (s)")
+
     fold_heatmaps = make_subplots(
         rows=1,
-        cols=2,
-        subplot_titles=("Sensors", "Aligned PCA"),
-        horizontal_spacing=0.12,
+        cols=n_representations,
+        subplot_titles=representation_names,
+        horizontal_spacing=0.08,
     )
-    for column, representation in enumerate(("Sensors", "Aligned PCA"), start=1):
+    for column, representation in enumerate(representation_names, start=1):
         rows = metric_rows[metric_rows["Representation"] == representation]
         matrix = rows.pivot(index="Fold", columns="Time", values="Value").sort_index()
         fold_labels = [
@@ -614,8 +1034,8 @@ def run_decoding_analysis(
                 zmin=0,
                 zmax=1,
                 colorscale="Viridis",
-                colorbar={"title": "BA"} if column == 2 else None,
-                showscale=column == 2,
+                colorbar={"title": "BA"} if column == n_representations else None,
+                showscale=column == n_representations,
             ),
             row=1,
             col=column,
@@ -625,7 +1045,7 @@ def run_decoding_analysis(
     fold_heatmaps.update_layout(
         title="Balanced accuracy for every held-out participant",
         height=max(520, 32 * len(analyzed_subjects) + 250),
-        width=1050,
+        width=max(1050, 320 * n_representations),
     )
 
     fold_summary_figure = make_subplots(
@@ -637,14 +1057,14 @@ def run_decoding_analysis(
         ("postcue_mean_balanced_accuracy", "postcue_auc_above_chance"),
         start=1,
     ):
-        for representation in ("Sensors", "Aligned PCA"):
+        for representation in representation_names:
             rows = fold_summary[fold_summary["Representation"] == representation]
             fold_summary_figure.add_trace(
                 go.Box(
                     x=[representation] * len(rows),
                     y=rows[metric],
                     name=representation,
-                    marker_color=REPRESENTATION_COLORS[representation],
+                    marker_color=representation_colors[representation],
                     boxpoints="all",
                     jitter=0.25,
                     pointpos=0,
@@ -655,7 +1075,7 @@ def run_decoding_analysis(
                 col=column,
             )
     fold_summary_figure.add_hline(
-        y=CHANCE_LEVEL,
+        y=chance_level,
         line_dash="dot",
         line_color="#777777",
         row=1,
@@ -674,6 +1094,123 @@ def run_decoding_analysis(
         width=1000,
     )
 
+    representation_comparison_figure = plot_group_scatter_with_mean(
+        [
+            fold_summary.loc[
+                fold_summary["Representation"] == representation, "peak_balanced_accuracy"
+            ].to_numpy()
+            for representation in representation_names
+        ],
+        representation_names,
+        point_labels=[
+            fold_summary.loc[
+                fold_summary["Representation"] == representation, "held_out_subject"
+            ].to_numpy()
+            for representation in representation_names
+        ],
+        title="Peak balanced accuracy by representation, one point per held-out participant",
+        yaxis_title="peak balanced accuracy",
+        baseline=chance_level,
+        baseline_label="chance",
+        color=[representation_colors[name] for name in representation_names],
+        height=520,
+    )
+
+    # --- Validation 1: the within-participant ceiling -----------------------
+    print("Running within-participant upper bound...")
+    within_subject_scores, within_subject_curve = _within_subject_upper_bound(
+        X=X,
+        y=y,
+        trial_ids=trial_ids,
+        subject_ids=subject_ids,
+        times=times,
+        base_config=sensor_config,
+        n_splits=within_subject_splits,
+        seed=seed,
+    )
+    upper_bound_frame = pd.concat(
+        [
+            temporal_scores.loc[
+                temporal_scores["Representation"] == "Sensors",
+                ["Model", "Metric", "Time", "Mean", "Std"],
+            ],
+            within_subject_curve,
+        ],
+        ignore_index=True,
+    )
+    upper_bound_figure = plot_temporal_score_curve(
+        upper_bound_frame,
+        metric="balanced_accuracy",
+        title="Within-participant ceiling versus cross-participant transfer (sensors)",
+        colors={
+            "Sensors": representation_colors["Sensors"],
+            "Within participant (sensors)": WITHIN_SUBJECT_COLOR,
+        },
+    )
+    upper_bound_figure.add_hline(y=chance_level, line_dash="dot", line_color="#777777")
+    upper_bound_figure.add_vline(x=0, line_color="#999999")
+    upper_bound_figure.update_yaxes(title_text="balanced accuracy")
+    upper_bound_figure.update_xaxes(title_text="time from movement cue (s)")
+
+    within_subject_peaks = (
+        within_subject_scores.loc[
+            within_subject_scores.groupby("subject")["Mean"].idxmax(),
+            ["subject", "Time", "Mean"],
+        ]
+        .rename(columns={"Time": "peak_time_s", "Mean": "peak_balanced_accuracy"})
+        .sort_values("subject")
+        .reset_index(drop=True)
+    )
+
+    # --- Validation 2: what the rotation actually does ----------------------
+    print("Measuring alignment geometry...")
+    alignment_geometry = _alignment_geometry(
+        X=X,
+        subject_ids=subject_ids,
+        n_components=n_components,
+        seed=seed,
+    )
+    held_out_geometry = alignment_geometry[alignment_geometry["role"] == "held out"]
+    geometry_figure = plot_group_scatter_with_mean(
+        [
+            held_out_geometry["template_similarity_unrotated"].to_numpy(),
+            held_out_geometry["template_similarity_rotated"].to_numpy(),
+        ],
+        ["before rotation", "after rotation"],
+        point_labels=[
+            held_out_geometry["subject"].to_numpy(),
+            held_out_geometry["subject"].to_numpy(),
+        ],
+        title=(
+            "Shape agreement between each held-out participant's mean path and "
+            "the training template"
+        ),
+        yaxis_title="normalized similarity to template",
+        baseline=0.0,
+        color=[
+            representation_colors[unaligned_name],
+            representation_colors[aligned_large_name],
+        ],
+        height=460,
+    )
+
+    # --- Validation 3: is the gain just transduction? -----------------------
+    calibration_frame = temporal_scores[
+        temporal_scores["Representation"].isin(
+            [shared_pca_name, aligned_large_name, calibration_name]
+        )
+    ]
+    calibration_figure = plot_temporal_score_curve(
+        calibration_frame,
+        metric="balanced_accuracy",
+        title="Transductive alignment versus calibration-half alignment",
+        colors=representation_colors,
+    )
+    calibration_figure.add_hline(y=chance_level, line_dash="dot", line_color="#777777")
+    calibration_figure.add_vline(x=0, line_color="#999999")
+    calibration_figure.update_yaxes(title_text="balanced accuracy")
+    calibration_figure.update_xaxes(title_text="time from movement cue (s)")
+
     tables = {
         "trial_counts": trial_counts,
         "split_audit": split_audit,
@@ -683,12 +1220,27 @@ def run_decoding_analysis(
         "fold_summary": fold_summary,
         "representation_summary": representation_summary,
         "paired_fold_differences": paired_fold_differences,
+        "gain_through_time": gain_through_time,
+        "significance_assessment": significance_assessment,
+        "significance_summary": significance_summary,
+        "within_subject_scores": within_subject_scores,
+        "within_subject_peaks": within_subject_peaks,
+        "alignment_geometry": alignment_geometry,
         "fit_diagnostics": fit_diagnostics,
     }
     figures = {
         "temporal_decoding": temporal_figure,
+        "gain_through_time": gain_through_time_figure,
+        "within_subject_upper_bound": upper_bound_figure,
+        "alignment_geometry": geometry_figure,
+        "calibration_alignment": calibration_figure,
         "fold_heatmaps": fold_heatmaps,
         "fold_summaries": fold_summary_figure,
+        "representation_comparison": representation_comparison_figure,
+        **{
+            f"significance_{key.replace(' ', '_')}": figure
+            for key, figure in significance_figures.items()
+        },
     }
     for name, table in tables.items():
         table.to_csv(output / f"{name}.csv", index=False)
@@ -723,8 +1275,12 @@ def run_decoding_analysis(
         "n_times": X.shape[2],
         "time_start": float(times[0]),
         "time_stop": float(times[-1]),
-        "chance_level": CHANCE_LEVEL,
+        "chance_level": chance_level,
         "n_components": n_components,
+        "small_n_components": small_n_components,
+        "n_permutations": n_permutations,
+        "within_subject_splits": within_subject_splits,
+        "geometry_max_trials": GEOMETRY_MAX_TRIALS,
         "static_exports_complete": static_export_error is None,
     }
     report_asset_mode = build_decoding_report(
@@ -732,21 +1288,33 @@ def run_decoding_analysis(
         context=context,
         tables=tables,
         figures=figures,
+        target_names=target_names,
+        representation_names=representation_names,
     )
 
     manifest = {
         "subjects_requested": subjects_requested,
         "subjects_analyzed": analyzed_subjects,
         "bids_root": str(bids_root),
-        "conditions": list(CONDITIONS),
+        "conditions": list(conditions),
         "analysis_window": list(ANALYSIS_WINDOW),
-        "target_mapping": {"0": LABEL_NAMES[3], "1": LABEL_NAMES[4]},
+        "target_mapping": target_mapping,
         "shape": list(X.shape),
         "cv": "leave_one_group_out",
         "metric": "balanced_accuracy",
-        "chance_level": CHANCE_LEVEL,
+        "chance_level": chance_level,
+        "representations": representation_names,
+        "validation_representation": calibration_name,
         "n_components": n_components,
+        "small_n_components": small_n_components,
+        "n_permutations": n_permutations,
+        "significance_comparisons": [
+            {"representation": representation, "baseline": baseline}
+            for representation, baseline in comparison_pairs
+        ],
         "alignment_adaptation": "transductive",
+        "within_subject_splits": within_subject_splits,
+        "geometry_max_trials": GEOMETRY_MAX_TRIALS,
         "random_state": seed,
         "n_jobs": n_jobs,
         "static_figure_exports_complete": static_export_error is None,
@@ -779,6 +1347,25 @@ def main(argv: list[str] | None = None) -> None:
         default=Path("outputs/tutorial_eegbci_decoding"),
     )
     parser.add_argument("--n-components", type=int, default=30)
+    parser.add_argument("--small-n-components", type=int, default=3)
+    parser.add_argument(
+        "--conditions",
+        nargs="*",
+        type=int,
+        default=list(DEFAULT_CONDITIONS),
+        help=(
+            "Condition ids to decode, e.g. 3 4 (left/right execution, default), "
+            "5 6 (left/right imagery), 7 9 (hands imagery vs execution), or "
+            "3 4 5 6 for 4-class."
+        ),
+    )
+    parser.add_argument("--n-permutations", type=int, default=200)
+    parser.add_argument(
+        "--within-subject-splits",
+        type=int,
+        default=5,
+        help="Folds for the within-participant upper-bound decoding.",
+    )
     parser.add_argument("--n-jobs", type=int, default=-1)
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument(
@@ -786,6 +1373,7 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Explicitly download/preprocess the requested EEGBCI participants.",
     )
+    parser.add_argument("--no-resume", action="store_false", dest="resume")
     args = parser.parse_args(argv)
 
     if args.subjects:
@@ -798,14 +1386,39 @@ def main(argv: list[str] | None = None) -> None:
         ]
         subjects_requested = available[: args.n_subjects]
 
-    run_decoding_analysis(
-        subjects_requested=subjects_requested,
-        bids_root=args.bids_root,
-        output=args.output,
-        n_components=args.n_components,
-        n_jobs=args.n_jobs,
-        seed=args.seed,
-        prepare=args.prepare,
+    manifest_path = args.output / "run_manifest.json"
+    if args.resume and _completed(manifest_path):
+        print(f"Completed run found at {manifest_path}; nothing to do.")
+        return
+    settings = {**vars(args), "subjects": subjects_requested}
+    write_manifest(manifest_path, settings, status="running")
+    try:
+        result = run_decoding_analysis(
+            subjects_requested=subjects_requested,
+            bids_root=args.bids_root,
+            output=args.output,
+            n_components=args.n_components,
+            small_n_components=args.small_n_components,
+            n_permutations=args.n_permutations,
+            within_subject_splits=args.within_subject_splits,
+            conditions=tuple(args.conditions),
+            n_jobs=args.n_jobs,
+            seed=args.seed,
+            prepare=args.prepare,
+        )
+    except Exception as error:
+        write_manifest(
+            manifest_path,
+            settings,
+            status="failed",
+            extra={"error": f"{type(error).__name__}: {error}"},
+        )
+        raise
+    write_manifest(
+        manifest_path,
+        settings,
+        status="complete",
+        extra={"analysis": result["manifest"]},
     )
 
 
