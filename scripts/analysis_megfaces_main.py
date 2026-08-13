@@ -30,13 +30,21 @@ from coco_pipe.dim_reduction import DimReduction
 from coco_pipe.report import PlotlyElement, Report, Section
 from coco_pipe.report.elements import (
     AccordionElement,
+    CalloutElement,
     InteractiveTableElement,
     MarkdownElement,
+    StatCardElement,
+    TabsElement,
 )
-from coco_pipe.viz.interactive import plot_scree, plot_trajectory
+from coco_pipe.viz.interactive import (
+    plot_scree,
+    plot_timecourses,
+    plot_trajectory,
+    plot_trajectory_metric_series,
+)
 from plotly.subplots import make_subplots
 
-from pca_neural_trajectories import write_manifest
+from pca_neural_trajectories import facet_figures, overlay_figures, write_manifest
 from pca_neural_trajectories.wakeman_henson import (
     LABEL_NAMES,
     MEG_SENSOR_SETS,
@@ -219,43 +227,27 @@ def run_megfaces_main_analysis(
                 np.sqrt(np.mean(evoked**2, axis=0))
             )
 
-    fig_sensor = go.Figure()
-    for condition in CONDITIONS:
-        curves = np.asarray(sensor_magnitude[condition])
-        mean = curves.mean(axis=0)
-        sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-        name = LABEL_NAMES[condition]
-        fig_sensor.add_trace(
-            go.Scatter(
-                x=times,
-                y=mean,
-                mode="lines",
-                name=name,
-                line={"color": CONDITION_COLORS[condition], "width": 3},
-            )
-        )
-        fig_sensor.add_trace(
-            go.Scatter(
-                x=times,
-                y=mean + sem,
-                mode="lines",
-                line={"width": 0},
-                showlegend=False,
-                hoverinfo="skip",
-            )
-        )
-        fig_sensor.add_trace(
-            go.Scatter(
-                x=times,
-                y=mean - sem,
-                mode="lines",
-                line={"width": 0},
-                fill="tonexty",
-                fillcolor=CONDITION_FILLS[condition],
-                showlegend=False,
-                hoverinfo="skip",
-            )
-        )
+    # One curve per participant, grouped by condition: plot_timecourses draws
+    # the group mean with an SEM band.
+    sensor_curves = np.concatenate(
+        [np.asarray(sensor_magnitude[condition]) for condition in CONDITIONS]
+    )[:, np.newaxis, :]
+    sensor_groups = [
+        LABEL_NAMES[condition]
+        for condition in CONDITIONS
+        for _ in sensor_magnitude[condition]
+    ]
+    fig_sensor = plot_timecourses(
+        sensor_curves,
+        times=times,
+        channel_names=["RMS"],
+        group_labels=sensor_groups,
+        palette={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+        error_style="band",
+        xlabel="Time (s)",
+        ylabel="RMS response (noise-normalised units)",
+        title="Whitened sensor-space response magnitude",
+    )
     fig_sensor.add_vline(x=0, line_dash="dash", line_color="black")
     fig_sensor.update_layout(
         title="Whitened sensor-space response magnitude",
@@ -338,65 +330,30 @@ def run_megfaces_main_analysis(
         for condition in CONDITIONS
     }
 
-    fig_pc = make_subplots(
-        rows=N_DISPLAY_COMPONENTS,
-        cols=1,
-        shared_xaxes=True,
-        subplot_titles=[f"PC{i + 1}" for i in range(N_DISPLAY_COMPONENTS)],
-        vertical_spacing=0.08,
+    # Channels are principal components, groups are conditions: one stacked
+    # panel per PC with the across-participant mean and SEM band.
+    pc_curves = np.stack(
+        [
+            subject_condition[subject, condition][:, :N_DISPLAY_COMPONENTS].T
+            for condition in CONDITIONS
+            for subject in unique_subjects
+        ]
     )
-    for pc in range(N_DISPLAY_COMPONENTS):
-        for condition in CONDITIONS:
-            curves = np.stack(
-                [
-                    subject_condition[subject, condition][:, pc]
-                    for subject in unique_subjects
-                ]
-            )
-            mean = curves.mean(axis=0)
-            sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-            name = LABEL_NAMES[condition]
-            fig_pc.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean,
-                    mode="lines",
-                    name=name,
-                    legendgroup=name,
-                    showlegend=pc == 0,
-                    line={"color": CONDITION_COLORS[condition], "width": 2.5},
-                ),
-                row=pc + 1,
-                col=1,
-            )
-            fig_pc.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean + sem,
-                    mode="lines",
-                    line={"width": 0},
-                    legendgroup=name,
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=pc + 1,
-                col=1,
-            )
-            fig_pc.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean - sem,
-                    mode="lines",
-                    line={"width": 0},
-                    fill="tonexty",
-                    fillcolor=CONDITION_FILLS[condition],
-                    legendgroup=name,
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=pc + 1,
-                col=1,
-            )
+    pc_groups = [
+        LABEL_NAMES[condition] for condition in CONDITIONS for _ in unique_subjects
+    ]
+    fig_pc = plot_timecourses(
+        pc_curves,
+        times=times,
+        channel_names=[f"PC{index + 1}" for index in range(N_DISPLAY_COMPONENTS)],
+        group_labels=pc_groups,
+        palette={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+        n_cols=1,
+        error_style="band",
+        xlabel="Time (s)",
+        ylabel="Score (a.u.)",
+        title="Principal-component time courses",
+    )
     fig_pc.add_vline(x=0, line_dash="dash", line_color="black")
     fig_pc.update_xaxes(title_text="Time (s)", row=N_DISPLAY_COMPONENTS, col=1)
     fig_pc.update_yaxes(title_text="Score (a.u.)")
@@ -488,77 +445,44 @@ def run_megfaces_main_analysis(
         for space, trajectories in metric_trajectory_spaces.items()
     }
     contrast_names = ["Faces vs Scrambled", "Famous vs Unfamiliar"]
-    fig_contrasts = make_subplots(
-        rows=len(contrast_curves_by_space),
-        cols=2,
-        shared_xaxes=True,
-        shared_yaxes=True,
-        subplot_titles=[
-            f"{space}: {contrast}"
-            for space in contrast_curves_by_space
-            for contrast in contrast_names
-        ],
+    # Each panel layers two coco-pipe figures: the per-participant curves
+    # underneath, the group mean with its SEM band on top.
+    contrast_panels = {}
+    for space, space_curves in contrast_curves_by_space.items():
+        for name in contrast_names:
+            curves = np.asarray(space_curves[name])
+            participants = plot_trajectory_metric_series(
+                curves,
+                times=times,
+                labels=np.array([f"sub-{subject}" for subject in unique_subjects]),
+                color_map={
+                    f"sub-{subject}": CONTRAST_COLORS[name]
+                    for subject in unique_subjects
+                },
+                title=f"{space}: {name}",
+                ylabel="Baseline-relative distance",
+            )
+            participants.update_traces(line={"width": 1}, showlegend=False)
+            group = plot_timecourses(
+                curves[:, np.newaxis, :],
+                times=times,
+                channel_names=[name],
+                group_labels=[name] * len(curves),
+                palette={name: CONTRAST_COLORS[name]},
+                error_style="band",
+                xlabel="Time (s)",
+                ylabel="Baseline-relative distance",
+                title=f"{space}: {name}",
+            )
+            contrast_panels[f"{space}: {name}"] = overlay_figures(
+                [participants, group], opacities=[0.28, None]
+            )
+    fig_contrasts = facet_figures(
+        contrast_panels,
+        n_cols=2,
+        title="Planned contrasts: participants and group mean",
+        row_height=380,
     )
-    for row, (space, space_curves) in enumerate(
-        contrast_curves_by_space.items(), start=1
-    ):
-        for column, name in enumerate(contrast_names, start=1):
-            curves = space_curves[name]
-            color = CONTRAST_COLORS[name]
-            for subject, curve in zip(unique_subjects, curves, strict=True):
-                fig_contrasts.add_trace(
-                    go.Scatter(
-                        x=times,
-                        y=curve,
-                        mode="lines",
-                        line={"color": color, "width": 1},
-                        opacity=0.28,
-                        name=f"sub-{subject}",
-                        showlegend=False,
-                    ),
-                    row=row,
-                    col=column,
-                )
-            mean = curves.mean(axis=0)
-            sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-            fig_contrasts.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean,
-                    mode="lines",
-                    line={"color": color, "width": 4},
-                    name=f"{space}: {name}",
-                    showlegend=False,
-                ),
-                row=row,
-                col=column,
-            )
-            fig_contrasts.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean + sem,
-                    mode="lines",
-                    line={"width": 0},
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=row,
-                col=column,
-            )
-            fig_contrasts.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean - sem,
-                    mode="lines",
-                    line={"width": 0},
-                    fill="tonexty",
-                    fillcolor=CONTRAST_FILLS[name],
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=row,
-                col=column,
-            )
     fig_contrasts.add_vline(x=0, line_dash="dash", line_color="black")
     fig_contrasts.add_hline(y=0, line_dash="dot", line_color="grey")
     fig_contrasts.update_xaxes(title_text="Time (s)")
@@ -706,17 +630,11 @@ def run_megfaces_main_analysis(
     )
 
     # ------------------------------------------------------------------ Steps 9--10
-    fig_speed = make_subplots(
-        rows=len(metric_trajectory_spaces),
-        cols=1,
-        shared_xaxes=True,
-        subplot_titles=list(metric_trajectory_spaces),
-    )
     speed_summary_rows: list[dict[str, object]] = []
     speed_timeseries_rows: list[dict[str, object]] = []
-    for row, (space, trajectories) in enumerate(
-        metric_trajectory_spaces.items(), start=1
-    ):
+    speed_curves_by_space: dict[str, dict[str, np.ndarray]] = {}
+    for space, trajectories in metric_trajectory_spaces.items():
+        speed_curves_by_space[space] = {}
         for condition in CONDITIONS:
             speed_curves = []
             for subject in unique_subjects:
@@ -748,49 +666,48 @@ def run_megfaces_main_analysis(
                         "peak_time_s": active_times[peak_index],
                     }
                 )
-            speed_curves = np.asarray(speed_curves)
-            mean = speed_curves.mean(axis=0)
-            sem = speed_curves.std(axis=0, ddof=1) / np.sqrt(len(speed_curves))
-            name = LABEL_NAMES[condition]
-            fig_speed.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean,
-                    mode="lines",
-                    name=name,
-                    legendgroup=name,
-                    showlegend=row == 1,
-                    line={"color": CONDITION_COLORS[condition], "width": 3},
-                ),
-                row=row,
-                col=1,
+            speed_curves_by_space[space][LABEL_NAMES[condition]] = np.asarray(
+                speed_curves
             )
-            fig_speed.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean + sem,
-                    mode="lines",
-                    line={"width": 0},
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=row,
-                col=1,
-            )
-            fig_speed.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=mean - sem,
-                    mode="lines",
-                    line={"width": 0},
-                    fill="tonexty",
-                    fillcolor=CONDITION_FILLS[condition],
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=row,
-                col=1,
-            )
+
+    # One panel per PCA space: participant speed curves under the condition
+    # means and their SEM bands.
+    speed_panels = {}
+    for space, condition_curves in speed_curves_by_space.items():
+        stacked = np.concatenate(list(condition_curves.values()))
+        groups = [
+            name for name, curves in condition_curves.items() for _ in range(len(curves))
+        ]
+        participants = plot_trajectory_metric_series(
+            stacked,
+            times=times,
+            labels=np.array(groups),
+            color_map={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+            title=space,
+            ylabel="Speed (a.u./s)",
+        )
+        participants.update_traces(line={"width": 1}, showlegend=False)
+        group = plot_timecourses(
+            stacked[:, np.newaxis, :],
+            times=times,
+            channel_names=["speed"],
+            group_labels=groups,
+            palette={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+            error_style="band",
+            xlabel="Time (s)",
+            ylabel="Speed (a.u./s)",
+            title=space,
+        )
+        speed_panels[space] = overlay_figures(
+            [participants, group], opacities=[0.25, None]
+        )
+    fig_speed = facet_figures(
+        speed_panels,
+        n_cols=1,
+        title="Trajectory speed: participants and condition means",
+        row_height=380,
+        shared_yaxes=False,
+    )
     fig_speed.add_vline(x=0, line_dash="dash", line_color="black")
     fig_speed.update_xaxes(title_text="Time (s)")
     fig_speed.update_yaxes(title_text="Speed (a.u./s)")
@@ -968,69 +885,42 @@ def run_megfaces_main_analysis(
         )
     )
 
-    fig_focused_sep = make_subplots(
-        rows=1,
-        cols=2,
-        shared_yaxes=True,
-        subplot_titles=list(focused_results),
-    )
-    for column, (pair_name, result) in enumerate(focused_results.items(), start=1):
+    # Same two-layer construction as the planned contrasts, per focused pair.
+    focused_panels = {}
+    for pair_name, result in focused_results.items():
         curves = np.asarray(result["separation"])
-        color = CONTRAST_COLORS[pair_name]
-        for subject, curve in zip(unique_subjects, curves, strict=True):
-            fig_focused_sep.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=curve,
-                    mode="lines",
-                    line={"color": color, "width": 1},
-                    opacity=0.28,
-                    showlegend=False,
-                    name=f"sub-{subject}",
-                ),
-                row=1,
-                col=column,
-            )
-        mean = curves.mean(axis=0)
-        sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-        fig_focused_sep.add_trace(
-            go.Scatter(
-                x=times,
-                y=mean,
-                mode="lines",
-                line={"color": color, "width": 4},
-                showlegend=False,
-                name=pair_name,
-            ),
-            row=1,
-            col=column,
+        participants = plot_trajectory_metric_series(
+            curves,
+            times=times,
+            labels=np.array([f"sub-{subject}" for subject in unique_subjects]),
+            color_map={
+                f"sub-{subject}": CONTRAST_COLORS[pair_name]
+                for subject in unique_subjects
+            },
+            title=pair_name,
+            ylabel="Baseline-relative distance",
         )
-        fig_focused_sep.add_trace(
-            go.Scatter(
-                x=times,
-                y=mean + sem,
-                mode="lines",
-                line={"width": 0},
-                showlegend=False,
-                hoverinfo="skip",
-            ),
-            row=1,
-            col=column,
+        participants.update_traces(line={"width": 1}, showlegend=False)
+        group = plot_timecourses(
+            curves[:, np.newaxis, :],
+            times=times,
+            channel_names=[pair_name],
+            group_labels=[pair_name] * len(curves),
+            palette={pair_name: CONTRAST_COLORS[pair_name]},
+            error_style="band",
+            xlabel="Time (s)",
+            ylabel="Baseline-relative distance",
+            title=pair_name,
         )
-        fig_focused_sep.add_trace(
-            go.Scatter(
-                x=times,
-                y=mean - sem,
-                mode="lines",
-                line={"width": 0},
-                fill="tonexty",
-                fillcolor=CONTRAST_FILLS[pair_name],
-                showlegend=False,
-                hoverinfo="skip",
-            ),
-            row=1,
-            col=column,
+        focused_panels[pair_name] = overlay_figures(
+            [participants, group], opacities=[0.28, None]
         )
+    fig_focused_sep = facet_figures(
+        focused_panels,
+        n_cols=2,
+        title="Focused-PCA separation: participants and group mean",
+        row_height=380,
+    )
     fig_focused_sep.add_vline(x=0, line_dash="dash", line_color="black")
     fig_focused_sep.add_hline(y=0, line_dash="dot", line_color="grey")
     fig_focused_sep.update_xaxes(title_text="Time (s)")
@@ -1134,30 +1024,55 @@ def run_megfaces_main_analysis(
 
     # A self-contained report is required here: unlike the standalone figure
     # HTML files, its Plotly, Tailwind, and pako assets are embedded directly.
-    overview = Section("Overview", icon="O")
+    report.add_summary_card(
+        {
+            "Participants": len(unique_subjects),
+            "Trials": f"{X.shape[0]:,}",
+            "Variance @ 3 PCs": f"{explained_variance[:3].sum():.1%}",
+            "Sensors": f"{n_sensors} ({sensor_set})",
+            "Permutations": n_perm,
+        }
+    )
+
+    overview = Section(
+        "Overview",
+        icon="O",
+        description="Face-processing trajectories in whitened MEG sensor space",
+        metadata={
+            "Participants": ", ".join(unique_subjects),
+            "Trials x sensors x time": str(X.shape),
+            "Window": f"{times[0]:+.3f} to {times[-1]:+.3f} s",
+            "Sampling rate": f"{1 / np.diff(times).mean():.1f} Hz",
+            "Sensor set": f"{sensor_set} ({n_sensors} sensors)",
+            "PCA metric mode": str(metric_pca_mode),
+            "Components": str(n_components),
+            "Active window": f"{ACTIVE_WINDOW[0]:.1f}-{ACTIVE_WINDOW[1]:.1f} s",
+            "Permutations": str(n_perm),
+            "Whitening": str(container.meta.get("whitening", "not recorded")),
+        },
+    )
     overview.add_element(
         MarkdownElement(
             "This report mirrors every analysis and interpretation step in "
             "`tutorial_megfaces_main.ipynb`. It uses the **Wakeman-Henson "
             "multimodal face-processing dataset** to compare Famous faces, "
-            "Unfamiliar faces, and Scrambled images in whitened MEG sensor space.\n\n"
-            "| Parameter | Value |\n|---|---|\n"
-            f"| Participants | {', '.join(unique_subjects)} |\n"
-            f"| Trials x sensors x time | {X.shape} |\n"
-            f"| Time window | {times[0]:+.3f} to {times[-1]:+.3f} s |\n"
-            f"| Sampling rate | {1 / np.diff(times).mean():.1f} Hz |\n"
-            f"| Sensor set | {sensor_set} ({n_sensors} sensors) |\n"
-            f"| PCA metric mode | {metric_pca_mode} |\n"
-            f"| Fitted components | {n_components} |\n"
-            f"| Active window | {ACTIVE_WINDOW[0]:.1f}-{ACTIVE_WINDOW[1]:.1f} s |\n"
-            f"| Within-participant permutations | {n_perm} |\n"
-            f"| Whitening | {container.meta.get('whitening', 'not recorded')} |\n\n"
-            "> This is a descriptive sensor-space analysis, not source localisation."
+            "Unfamiliar faces, and Scrambled images in whitened MEG sensor space."
+        )
+    )
+    overview.add_element(
+        CalloutElement(
+            "This is a descriptive sensor-space analysis, not source localisation.",
+            kind="warning",
+            title="Scope",
         )
     )
     report.add_section(overview)
 
-    step0 = Section("Step 0 - Setup and Analysis Choices", icon="0")
+    step0 = Section(
+        "Step 0 - Setup and Analysis Choices",
+        icon="0",
+        description="Prepared derivatives in, every choice recorded in the manifests",
+    )
     step0.add_element(
         MarkdownElement(
             "This workflow reads prepared MEG derivatives only; downloading and "
@@ -1172,21 +1087,35 @@ def run_megfaces_main_analysis(
     )
     report.add_section(step0)
 
-    step1 = Section("Step 1 - Define the Neural State", icon="1")
+    step1 = Section(
+        "Step 1 - Define the Neural State",
+        icon="1",
+        description="The whitened sensor pattern at each time point",
+    )
     step1.add_element(
         MarkdownElement(
             f"At each time point the state is the pattern across **{n_sensors} "
             "retained MEG sensors**. Participant-specific empty-room covariance "
             "whitening places magnetometers and gradiometers on a common noise "
             "scale before PCA. Channels are not z-scored again because that would "
-            "discard the measured noise scaling.\n\n"
-            "> Sensor-space PCs mix already mixed neural sources. Interpret timing "
-            "and trajectory geometry, not an individual PC as an anatomical generator."
+            "discard the measured noise scaling."
+        )
+    )
+    step1.add_element(
+        CalloutElement(
+            "Sensor-space PCs mix already mixed neural sources. Interpret timing and "
+            "trajectory geometry, not an individual PC as an anatomical generator.",
+            kind="warning",
+            title="What a PC is not",
         )
     )
     report.add_section(step1)
 
-    step2 = Section("Step 2 - Load and Inspect Participants", icon="2")
+    step2 = Section(
+        "Step 2 - Load and Inspect Participants",
+        icon="2",
+        description="Trial counts and a sensor-space RMS sanity check",
+    )
     step2.add_element(
         MarkdownElement(
             "The loader returns `trial x sensor x time` and keeps condition, "
@@ -1197,14 +1126,24 @@ def run_megfaces_main_analysis(
     )
     step2.add_element(PlotlyElement(fig_sensor, height="520px"))
     step2.add_element(
-        InteractiveTableElement(trial_counts, title="Trials by participant and condition")
-    )
-    step2.add_element(
-        InteractiveTableElement(repetition_counts, title="Trials by repetition type")
+        TabsElement(
+            {
+                "By condition": InteractiveTableElement(
+                    trial_counts, title="Trials by participant and condition"
+                ),
+                "By repetition": InteractiveTableElement(
+                    repetition_counts, title="Trials by repetition type"
+                ),
+            }
+        )
     )
     report.add_section(step2)
 
-    step3 = Section("Step 3 - Reshape into PCA Observations", icon="3")
+    step3 = Section(
+        "Step 3 - Reshape into PCA Observations",
+        icon="3",
+        description="(trial, sensor, time) flattened to (trial x time, sensor)",
+    )
     step3.add_element(
         MarkdownElement(
             "PCA receives `(trial, sensor, time) -> (trial x time, sensor)`. "
@@ -1216,21 +1155,48 @@ def run_megfaces_main_analysis(
     )
     report.add_section(step3)
 
-    step4 = Section("Step 4 - Fit One Shared PCA", icon="4")
+    step4 = Section(
+        "Step 4 - Fit One Shared PCA",
+        icon="4",
+        description="One unsupervised basis across every participant and condition",
+    )
     step4.add_element(
         MarkdownElement(
             f"One unsupervised PCA is fitted across every participant and condition. "
             f"The first three PCs explain **{explained_variance[:3].sum():.1%}** "
-            f"and all {n_components} fitted PCs explain **{explained_variance.sum():.1%}**.\n\n"
-            "> Three PCs are a display choice. A clear 3-D trajectory does not show "
-            "that the response is intrinsically three-dimensional."
+            f"and all {n_components} fitted PCs explain **{explained_variance.sum():.1%}**."
+        )
+    )
+    step4.add_columns(
+        [
+            StatCardElement(
+                "Variance @ 3 PCs", f"{explained_variance[:3].sum():.1%}", color="blue"
+            ),
+            StatCardElement(
+                f"Variance @ {n_components} PCs",
+                f"{explained_variance.sum():.1%}",
+                color="green",
+            ),
+            StatCardElement("PC1", f"{explained_variance[0]:.1%}", color="purple"),
+        ]
+    )
+    step4.add_element(
+        CalloutElement(
+            "Three PCs are a display choice. A clear 3-D trajectory does not show "
+            "that the response is intrinsically three-dimensional.",
+            kind="warning",
+            title="Dimensionality caveat",
         )
     )
     step4.add_element(PlotlyElement(fig_scree, height="520px"))
     step4.add_element(InteractiveTableElement(shared_variance, title="Shared PCA variance"))
     report.add_section(step4)
 
-    step5 = Section("Step 5 - Reconstruct and Baseline Trajectories", icon="5")
+    step5 = Section(
+        "Step 5 - Reconstruct and Baseline Trajectories",
+        icon="5",
+        description="Scores unstacked and anchored to the pre-stimulus baseline",
+    )
     step5.add_element(
         MarkdownElement(
             "Scores are reshaped to `trial x time x component`, then each trial's "
@@ -1252,7 +1218,11 @@ def run_megfaces_main_analysis(
         )
     report.add_section(step5)
 
-    step6 = Section("Step 6 - Plot All Conditions in One Space", icon="6")
+    step6 = Section(
+        "Step 6 - Plot All Conditions in One Space",
+        icon="6",
+        description="Participant-weighted condition means in the shared basis",
+    )
     step6.add_element(
         MarkdownElement(
             "Trials are averaged within participant and condition before the "
@@ -1262,11 +1232,21 @@ def run_megfaces_main_analysis(
             "bends are geometric descriptions, not evidence of oscillatory mechanisms."
         )
     )
-    step6.add_element(PlotlyElement(fig_2d, height="620px"))
-    step6.add_element(PlotlyElement(fig_3d, height="740px"))
+    step6.add_element(
+        TabsElement(
+            {
+                "2D": PlotlyElement(fig_2d, height="620px"),
+                "3D": PlotlyElement(fig_3d, height="740px"),
+            }
+        )
+    )
     report.add_section(step6)
 
-    step7 = Section("Step 7 - Evaluate Planned Contrasts", icon="7")
+    step7 = Section(
+        "Step 7 - Evaluate Planned Contrasts",
+        icon="7",
+        description="Famous vs Unfamiliar and Faces vs Scrambled, per participant",
+    )
     step7.add_element(
         MarkdownElement(
             "**Famous vs Unfamiliar** is the distance between those condition "
@@ -1292,7 +1272,11 @@ def run_megfaces_main_analysis(
     step7.add_element(details)
     report.add_section(step7)
 
-    step8 = Section("Step 8 - Compare with a Within-Participant Null", icon="8")
+    step8 = Section(
+        "Step 8 - Compare with a Within-Participant Null",
+        icon="8",
+        description="Labels shuffled inside each participant, PCA axes held fixed",
+    )
     step8.add_element(
         MarkdownElement(
             "PCA axes stay fixed while condition labels are shuffled separately "
@@ -1308,7 +1292,11 @@ def run_megfaces_main_analysis(
     step8.add_element(InteractiveTableElement(inference, title="Permutation inference"))
     report.add_section(step8)
 
-    step9 = Section("Step 9 - Describe Trajectory Speed", icon="9")
+    step9 = Section(
+        "Step 9 - Describe Trajectory Speed",
+        icon="9",
+        description="Norm of the time derivative of each condition-mean path",
+    )
     step9.add_element(
         MarkdownElement(
             "Speed is the norm of the numerical time derivative of each participant's "
@@ -1323,7 +1311,11 @@ def run_megfaces_main_analysis(
     step9.add_element(InteractiveTableElement(speed_summary, title="Participant speed summary"))
     report.add_section(step9)
 
-    step10 = Section("Step 10 - Check Component Sensitivity", icon="10")
+    step10 = Section(
+        "Step 10 - Check Component Sensitivity",
+        icon="10",
+        description="2, 3, and 5 PCs compared by curve correlation and peak timing",
+    )
     step10.add_element(
         MarkdownElement(
             "Distances grow as orthogonal dimensions are added, so raw AUC values "
@@ -1337,7 +1329,11 @@ def run_megfaces_main_analysis(
     )
     report.add_section(step10)
 
-    step11 = Section("Step 11 - Fit Focused Two-Condition PCAs", icon="11")
+    step11 = Section(
+        "Step 11 - Fit Focused Two-Condition PCAs",
+        icon="11",
+        description="Pair-specific bases as a sensitivity check on the shared PCA",
+    )
     step11.add_element(
         MarkdownElement(
             "The three-condition PCA remains primary. Two additional shared PCAs "
@@ -1348,15 +1344,25 @@ def run_megfaces_main_analysis(
         )
     )
     step11.add_element(
-        PlotlyElement(focused_trajectory_figures["Famous vs Unfamiliar"], height="680px")
-    )
-    step11.add_element(
-        PlotlyElement(focused_trajectory_figures["Famous vs Scrambled"], height="680px")
+        TabsElement(
+            {
+                name: PlotlyElement(figure, height="680px")
+                for name, figure in focused_trajectory_figures.items()
+            }
+        )
     )
     step11.add_element(PlotlyElement(fig_focused_sep, height="520px"))
-    step11.add_element(InteractiveTableElement(focused_variance, title="Focused PCA variance"))
     step11.add_element(
-        InteractiveTableElement(focused_group_summary, title="Focused contrast summary")
+        TabsElement(
+            {
+                "Focused PCA variance": InteractiveTableElement(
+                    focused_variance, title="Focused PCA variance"
+                ),
+                "Contrast summary": InteractiveTableElement(
+                    focused_group_summary, title="Focused contrast summary"
+                ),
+            }
+        )
     )
     focused_details = AccordionElement("Participant-level focused contrasts", open=False)
     focused_details.add_element(
@@ -1365,7 +1371,11 @@ def run_megfaces_main_analysis(
     step11.add_element(focused_details)
     report.add_section(step11)
 
-    step12 = Section("Step 12 - Export, Reproduce, and Interpret", icon="12")
+    step12 = Section(
+        "Step 12 - Export, Reproduce, and Interpret",
+        icon="12",
+        description="What the bundle contains and what the numbers do not say",
+    )
     static_status = (
         "PNG and SVG exports completed."
         if static_export_error is None
@@ -1379,10 +1389,17 @@ def run_megfaces_main_analysis(
             "The complementary conclusions are:\n\n"
             "- one three-condition shared PCA supplies a common group space;\n"
             "- participant PCAs test metric sensitivity to the shared basis;\n"
-            "- focused PCAs ask whether a selected pair is clearer without the third condition.\n\n"
+            "- focused PCAs ask whether a selected pair is clearer without the third condition."
+        )
+    )
+    step12.add_element(
+        CalloutElement(
             "Group trajectory coordinates require shared axes. Statistical metrics "
             "are always computed per participant before group summarisation. The "
-            "analysis is descriptive and sensor-space based; it does not localize sources."
+            "analysis is descriptive and sensor-space based; it does not localize "
+            "sources.",
+            kind="tip",
+            title="Main takeaway",
         )
     )
     all_tables = AccordionElement("Appendix: all exported tables", open=False)

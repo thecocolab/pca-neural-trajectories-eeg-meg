@@ -24,12 +24,24 @@ import pandas as pd
 import plotly.graph_objects as go
 from coco_pipe.dim_reduction import DimReduction
 from coco_pipe.report import PlotlyElement, Report, Section
-from coco_pipe.report.elements import AccordionElement, InteractiveTableElement, MarkdownElement
-from coco_pipe.viz.interactive import plot_scree, plot_trajectory
-from plotly.subplots import make_subplots
+from coco_pipe.report.elements import (
+    AccordionElement,
+    CalloutElement,
+    ContainerElement,
+    Element,
+    InteractiveTableElement,
+    MarkdownElement,
+    TabsElement,
+)
+from coco_pipe.viz.interactive import (
+    plot_scree,
+    plot_timecourses,
+    plot_trajectory,
+    plot_trajectory_metric_series,
+)
 from scipy.ndimage import gaussian_filter1d
 
-from pca_neural_trajectories import write_manifest
+from pca_neural_trajectories import facet_figures, overlay_figures, write_manifest
 from pca_neural_trajectories.spectral import SPECTRAL_BANDS
 from pca_neural_trajectories.wakeman_henson import (
     LABEL_NAMES,
@@ -234,23 +246,22 @@ def run_spectral_analysis(
     demo_db = 10 * np.log10(
         np.maximum(smoothed, np.finfo(float).tiny) / smoothed[demo_baseline].mean()
     )
-    fig_transform = make_subplots(
-        rows=4,
-        cols=1,
-        shared_xaxes=True,
-        subplot_titles=(
+    # Four stages of the same demo channel, stacked as one panel each.
+    fig_transform = plot_timecourses(
+        np.stack([signed, filtered, power, demo_db])[np.newaxis, :, :],
+        times=demo_times,
+        channel_names=[
             "Whitened signed MEG",
             "Alpha-filtered signal",
             "Hilbert power",
             "Smoothed baseline-relative power",
-        ),
+        ],
+        n_cols=1,
+        error_style=None,
+        xlabel="Time (s)",
+        ylabel="Amplitude",
+        showlegend=False,
     )
-    for row, values in enumerate((signed, filtered, power, demo_db), start=1):
-        fig_transform.add_trace(
-            go.Scatter(x=demo_times, y=values, mode="lines", showlegend=False),
-            row=row,
-            col=1,
-        )
     fig_transform.add_vline(x=0, line_dash="dash", line_color="black")
     fig_transform.update_layout(
         height=760,
@@ -324,51 +335,36 @@ def run_spectral_analysis(
     del sources, container, source_X
 
     figures: dict[str, go.Figure] = {"power_transformation": fig_transform}
-    fig_sensor = make_subplots(
-        rows=3, cols=1, shared_xaxes=True, subplot_titles=list(SPECTRAL_BANDS)
-    )
-    for row, (band, data) in enumerate(band_data.items(), start=1):
+    # One panel per band; participants grouped by condition give mean + SEM.
+    sensor_panels = {}
+    for band, data in band_data.items():
+        curves, groups = [], []
         for condition in CONDITIONS:
-            curves = np.asarray(
-                [
-                    data["X"][(data["subjects"] == subject) & (data["labels"] == condition)].mean(
-                        axis=(0, 1)
-                    )
-                    for subject in subjects
-                ]
-            )
-            mean = curves.mean(axis=0)
-            sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-            fig_sensor.add_trace(
-                go.Scatter(
-                    x=data["times"],
-                    y=mean,
-                    mode="lines",
-                    name=LABEL_NAMES[condition],
-                    legendgroup=LABEL_NAMES[condition],
-                    showlegend=row == 1,
-                    line={"color": CONDITION_COLORS[condition], "width": 2.5},
-                ),
-                row=row,
-                col=1,
-            )
-            fig_sensor.add_trace(
-                go.Scatter(x=data["times"], y=mean + sem, line={"width": 0}, showlegend=False),
-                row=row,
-                col=1,
-            )
-            fig_sensor.add_trace(
-                go.Scatter(
-                    x=data["times"],
-                    y=mean - sem,
-                    line={"width": 0},
-                    fill="tonexty",
-                    fillcolor=CONDITION_FILLS[condition],
-                    showlegend=False,
-                ),
-                row=row,
-                col=1,
-            )
+            for subject in subjects:
+                curves.append(
+                    data["X"][
+                        (data["subjects"] == subject) & (data["labels"] == condition)
+                    ].mean(axis=(0, 1))
+                )
+                groups.append(LABEL_NAMES[condition])
+        sensor_panels[band] = plot_timecourses(
+            np.asarray(curves)[:, np.newaxis, :],
+            times=data["times"],
+            channel_names=[band],
+            group_labels=groups,
+            palette={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+            error_style="band",
+            xlabel="Time (s)",
+            ylabel="Power (dB re baseline)",
+            title=band,
+        )
+    fig_sensor = facet_figures(
+        sensor_panels,
+        n_cols=1,
+        title="Sensor-space band power",
+        row_height=320,
+        shared_yaxes=False,
+    )
     fig_sensor.add_vline(x=0, line_dash="dash", line_color="black")
     fig_sensor.update_layout(
         height=820, title="Whitened sensor-space band power", template="plotly_white"
@@ -494,33 +490,27 @@ def run_spectral_analysis(
         figures[f"{band}_scree"] = plot_scree(evr)
         figures[f"{band}_scree"].update_layout(title=f"{band}: shared PCA spectrum")
 
-        fig_pc = make_subplots(
-            rows=3, cols=1, shared_xaxes=True, subplot_titles=("PC1", "PC2", "PC3")
+        pc_curves, pc_groups = [], []
+        for condition in CONDITIONS:
+            for subject in subjects:
+                subject_mean = scores[
+                    (data["subjects"] == subject) & (data["labels"] == condition)
+                ].mean(axis=0)
+                pc_curves.append(subject_mean[:, :3].T)
+                pc_groups.append(LABEL_NAMES[condition])
+        fig_pc = plot_timecourses(
+            np.stack(pc_curves),
+            times=data["times"],
+            channel_names=[f"PC{index + 1}" for index in range(3)],
+            group_labels=pc_groups,
+            palette={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+            n_cols=1,
+            error_style="band",
+            xlabel="Time (s)",
+            ylabel="Score (a.u.)",
+            title=f"{band}: shared-PC timecourses",
         )
-        for pc in range(3):
-            for condition in CONDITIONS:
-                curves = np.stack(
-                    [
-                        scores[(data["subjects"] == subject) & (data["labels"] == condition)].mean(
-                            axis=0
-                        )[:, pc]
-                        for subject in subjects
-                    ]
-                )
-                fig_pc.add_trace(
-                    go.Scatter(
-                        x=data["times"],
-                        y=curves.mean(axis=0),
-                        mode="lines",
-                        name=LABEL_NAMES[condition],
-                        showlegend=pc == 0,
-                        line={"color": CONDITION_COLORS[condition], "width": 2.5},
-                    ),
-                    row=pc + 1,
-                    col=1,
-                )
         fig_pc.add_vline(x=0, line_dash="dash", line_color="black")
-        fig_pc.update_layout(height=700, title=f"{band}: shared-PC timecourses")
         figures[f"{band}_pc_timecourses"] = fig_pc
         for pc, weights in enumerate(np.asarray(pca.get_components())[:3], start=1):
             for index in np.argsort(np.abs(weights))[-5:][::-1]:
@@ -557,76 +547,55 @@ def run_spectral_analysis(
             height=650,
         )
 
-        fig_contrast = make_subplots(
-            rows=len(contrasts),
-            cols=2,
-            shared_xaxes=True,
-            subplot_titles=[
-                f"{space}: {name}"
-                for space in contrasts
-                for name in ("Faces vs Scrambled", "Famous vs Unfamiliar")
-            ],
-        )
-        for row, (space, space_curves) in enumerate(contrasts.items(), start=1):
-            for col, contrast in enumerate(("Faces vs Scrambled", "Famous vs Unfamiliar"), start=1):
-                curves = space_curves[contrast]
+        contrast_panels = {}
+        for space, space_curves in contrasts.items():
+            for contrast in ("Faces vs Scrambled", "Famous vs Unfamiliar"):
+                curves = np.asarray(space_curves[contrast])
                 color = CONTRAST_COLORS[contrast]
-                for subject, curve in zip(subjects, curves, strict=True):
-                    fig_contrast.add_trace(
-                        go.Scatter(
-                            x=data["times"],
-                            y=curve,
-                            line={"color": color, "width": 1},
-                            opacity=0.28,
-                            showlegend=False,
-                            name=f"sub-{subject}",
-                        ),
-                        row=row,
-                        col=col,
-                    )
-                mean = curves.mean(axis=0)
-                sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves))
-                fig_contrast.add_trace(
-                    go.Scatter(
-                        x=data["times"], y=mean, line={"color": color, "width": 4}, showlegend=False
-                    ),
-                    row=row,
-                    col=col,
+                participants = plot_trajectory_metric_series(
+                    curves,
+                    times=data["times"],
+                    labels=np.array([f"sub-{subject}" for subject in subjects]),
+                    color_map={f"sub-{subject}": color for subject in subjects},
+                    title=f"{space}: {contrast}",
+                    ylabel="Baseline-relative distance",
                 )
-                fig_contrast.add_trace(
-                    go.Scatter(x=data["times"], y=mean + sem, line={"width": 0}, showlegend=False),
-                    row=row,
-                    col=col,
+                participants.update_traces(line={"width": 1}, showlegend=False)
+                group = plot_timecourses(
+                    curves[:, np.newaxis, :],
+                    times=data["times"],
+                    channel_names=[contrast],
+                    group_labels=[contrast] * len(curves),
+                    palette={contrast: color},
+                    error_style="band",
+                    xlabel="Time (s)",
+                    ylabel="Baseline-relative distance",
+                    title=f"{space}: {contrast}",
                 )
-                fig_contrast.add_trace(
-                    go.Scatter(
-                        x=data["times"],
-                        y=mean - sem,
-                        line={"width": 0},
-                        fill="tonexty",
-                        fillcolor="rgba(123,44,191,0.12)",
-                        showlegend=False,
-                    ),
-                    row=row,
-                    col=col,
+                contrast_panels[f"{space}: {contrast}"] = overlay_figures(
+                    [participants, group], opacities=[0.28, None]
                 )
-        fig_contrast.add_vline(x=0, line_dash="dash", line_color="black")
-        fig_contrast.add_hline(y=0, line_dash="dot", line_color="grey")
-        fig_contrast.update_layout(height=380 * len(contrasts), title=f"{band}: planned contrasts")
+        fig_contrast = facet_figures(
+            contrast_panels,
+            n_cols=2,
+            title=f"{band}: planned contrasts",
+            row_height=360,
+        )
         figures[f"{band}_planned_contrasts"] = fig_contrast
 
-        fig_speed = make_subplots(
-            rows=len(spaces), cols=1, shared_xaxes=True, subplot_titles=list(spaces)
-        )
-        for row, (space, trajectories) in enumerate(spaces.items(), start=1):
+        speed_panels = {}
+        for space, trajectories in spaces.items():
+            curves, groups = [], []
             for condition in CONDITIONS:
-                curves = []
                 for subject in subjects:
                     mean = trajectories[
                         (data["subjects"] == subject) & (data["labels"] == condition)
                     ].mean(axis=0)
-                    speed = np.linalg.norm(np.gradient(mean, data["times"], axis=0), axis=1)
+                    speed = np.linalg.norm(
+                        np.gradient(mean, data["times"], axis=0), axis=1
+                    )
                     curves.append(speed)
+                    groups.append(LABEL_NAMES[condition])
                     speed_timeseries_rows.extend(
                         {
                             "band": band,
@@ -648,19 +617,37 @@ def run_spectral_analysis(
                             "peak_speed_0_600ms": speed[active].max(),
                         }
                     )
-                fig_speed.add_trace(
-                    go.Scatter(
-                        x=data["times"],
-                        y=np.mean(curves, axis=0),
-                        name=LABEL_NAMES[condition],
-                        showlegend=row == 1,
-                        line={"color": CONDITION_COLORS[condition], "width": 2.5},
-                    ),
-                    row=row,
-                    col=1,
-                )
-        fig_speed.add_vline(x=0, line_dash="dash", line_color="black")
-        fig_speed.update_layout(height=360 * len(spaces), title=f"{band}: trajectory speed")
+            stacked = np.asarray(curves)
+            participants = plot_trajectory_metric_series(
+                stacked,
+                times=data["times"],
+                labels=np.array(groups),
+                color_map={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+                title=space,
+                ylabel="Speed (a.u./s)",
+            )
+            participants.update_traces(line={"width": 1}, showlegend=False)
+            group = plot_timecourses(
+                stacked[:, np.newaxis, :],
+                times=data["times"],
+                channel_names=["speed"],
+                group_labels=groups,
+                palette={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
+                error_style="band",
+                xlabel="Time (s)",
+                ylabel="Speed (a.u./s)",
+                title=space,
+            )
+            speed_panels[space] = overlay_figures(
+                [participants, group], opacities=[0.25, None]
+            )
+        fig_speed = facet_figures(
+            speed_panels,
+            n_cols=1,
+            title=f"{band}: trajectory speed",
+            row_height=340,
+            shared_yaxes=False,
+        )
         figures[f"{band}_trajectory_speed"] = fig_speed
 
     pca_diagnostics = pd.DataFrame(pca_rows)
@@ -931,20 +918,49 @@ def run_spectral_analysis(
             arrays[f"{band}_focused_{slug}_{name}"] = np.asarray(result[name])
     np.savez_compressed(output / "spectral_analysis_arrays.npz", **arrays)
 
-    overview = Section("Overview", icon="O")
+    report.add_summary_card(
+        {
+            "Participants": len(subjects),
+            "Bands": len(SPECTRAL_BANDS),
+            "Sensors": f"{len(source_channels)} ({sensor_set})",
+            "PCA mode": str(metric_pca_mode),
+            "Permutations": n_perm,
+        }
+    )
+
+    def _stack(*elements: Element) -> ContainerElement:
+        """Bundle several elements into one tab panel."""
+        box = ContainerElement()
+        for element in elements:
+            box.add_element(element)
+        return box
+
+    overview = Section(
+        "Overview",
+        icon="O",
+        description="Independent alpha, beta and low-gamma PCA analyses",
+        metadata={
+            "Participants": ", ".join(subjects),
+            "Sensor set": f"{sensor_set} ({len(source_channels)} sensors)",
+            "Bands": "8-12, 13-30, and 30-45 Hz",
+            "Final window": "-0.2 to 0.8 s",
+            "PCA mode": str(metric_pca_mode),
+            "Family permutations": str(n_perm),
+        },
+    )
     overview.add_element(
         MarkdownElement(
             "This report mirrors `tutorial_megfaces_spectral_envelopes.ipynb`. "
             "Padded filtering and Hilbert power are followed by independent alpha, "
-            "beta, and low-gamma PCA analyses.\n\n"
-            f"- Participants: **{', '.join(subjects)}**\n"
-            f"- Sensor set: **{sensor_set} ({len(source_channels)} sensors)**\n"
-            "- Bands: **8-12, 13-30, and 30-45 Hz**\n"
-            "- Final window: **-0.2 to 0.8 s**\n"
-            f"- PCA mode: **{metric_pca_mode}**\n"
-            f"- Family permutations: **{n_perm}**\n\n"
-            "> The analysis describes noise-normalised sensor-space power, not "
-            "physical sensor power or source-localized oscillations."
+            "beta, and low-gamma PCA analyses."
+        )
+    )
+    overview.add_element(
+        CalloutElement(
+            "The analysis describes noise-normalised sensor-space power, not "
+            "physical sensor power or source-localized oscillations.",
+            kind="warning",
+            title="Scope",
         )
     )
     report.add_section(overview)
@@ -993,7 +1009,7 @@ def run_spectral_analysis(
             "Every band receives an independent shared PCA. Axes and raw distances "
             "are comparable within a band only.",
             [pca_diagnostics],
-            [figures[f"{band}_scree"] for band in SPECTRAL_BANDS],
+            {band: figures[f"{band}_scree"] for band in SPECTRAL_BANDS},
         ),
         (
             "Step 6 - Fit Participant PCAs",
@@ -1007,7 +1023,7 @@ def run_spectral_analysis(
             "PC signs are arbitrary. Timing and geometry are interpretable; strong "
             "sensor loadings are not source localization.",
             [loadings],
-            [figures[f"{band}_pc_timecourses"] for band in SPECTRAL_BANDS],
+            {band: figures[f"{band}_pc_timecourses"] for band in SPECTRAL_BANDS},
         ),
         (
             "Step 8 - Reconstruct Shared Trajectories",
@@ -1015,8 +1031,13 @@ def run_spectral_analysis(
             "equal-participant group means. Follow time within panels; do not "
             "equate axes across bands.",
             [],
-            [figures[f"{band}_trajectories_2d"] for band in SPECTRAL_BANDS]
-            + [figures[f"{band}_trajectories_3d"] for band in SPECTRAL_BANDS],
+            {
+                band: _stack(
+                    PlotlyElement(figures[f"{band}_trajectories_2d"], height="620px"),
+                    PlotlyElement(figures[f"{band}_trajectories_3d"], height="680px"),
+                )
+                for band in SPECTRAL_BANDS
+            },
         ),
         (
             "Step 9 - Planned Contrasts and Speed",
@@ -1024,15 +1045,24 @@ def run_spectral_analysis(
             "baseline-relative and computed per participant. Speed is descriptive "
             "and scale-specific.",
             [metric_group, speed_summary],
-            [figures[f"{band}_planned_contrasts"] for band in SPECTRAL_BANDS]
-            + [figures[f"{band}_trajectory_speed"] for band in SPECTRAL_BANDS],
+            {
+                band: _stack(
+                    PlotlyElement(figures[f"{band}_planned_contrasts"], height="620px"),
+                    PlotlyElement(figures[f"{band}_trajectory_speed"], height="620px"),
+                )
+                for band in SPECTRAL_BANDS
+            },
         ),
         (
             "Step 10 - Focused Two-Condition PCAs",
             "Focused models can prioritize pair-relevant variance. Compare "
             "divergence timing, not axes or raw distances between fitted models.",
             [focused_group],
-            [figure for name, figure in figures.items() if "_focused_" in name],
+            {
+                name.replace("_", " "): figure
+                for name, figure in figures.items()
+                if "_focused_" in name
+            },
         ),
         (
             "Step 11 - Compare Bands Carefully",
@@ -1056,8 +1086,22 @@ def run_spectral_analysis(
         for table in section_tables:
             if not table.empty:
                 section.add_element(InteractiveTableElement(table, title="Results"))
-        for figure in section_figures:
-            section.add_element(PlotlyElement(figure, height="680px"))
+        if isinstance(section_figures, dict):
+            # Band-wise figure sets are tabbed: three bands stacked vertically
+            # would bury the cross-band comparison the section is making.
+            section.add_element(
+                TabsElement(
+                    {
+                        name: figure
+                        if isinstance(figure, Element)
+                        else PlotlyElement(figure, height="680px")
+                        for name, figure in section_figures.items()
+                    }
+                )
+            )
+        else:
+            for figure in section_figures:
+                section.add_element(PlotlyElement(figure, height="680px"))
         report.add_section(section)
     export = Section("Step 13 - Export and Interpretation", icon="13")
     export.add_element(

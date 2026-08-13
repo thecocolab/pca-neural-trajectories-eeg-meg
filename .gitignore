@@ -8,3 +8,5 @@ PhysioNet_EEGBCI/
 build/
 dist/
 tutorials/data/
+tutorials/*png
+tutorials/*svg

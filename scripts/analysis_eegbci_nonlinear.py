@@ -23,22 +23,32 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 from coco_pipe.dim_reduction import DimReduction
 from coco_pipe.dim_reduction.evaluation import MethodSelector, compute_velocity_fields
 from coco_pipe.report import PlotlyElement, Report, Section
 from coco_pipe.report.elements import (
     AccordionElement,
+    CalloutElement,
+    ContainerElement,
     InteractiveTableElement,
     MarkdownElement,
+    StatCardElement,
+    TabsElement,
 )
 from coco_pipe.transforms import TemporalProcrustesAlignment
+from coco_pipe.viz.interactive import (
+    plot_group_scatter_with_mean,
+    plot_grouped_bar,
+    plot_scatter,
+    plot_streamlines,
+    plot_trajectory,
+)
 from coco_pipe.viz.theme import set_coco_theme
-from plotly.subplots import make_subplots
 from sklearn.metrics import silhouette_score
 
 from pca_neural_trajectories import (
     LABEL_NAMES,
+    facet_figures,
     load_eegbci_container,
     setup_data_bids,
     write_manifest,
@@ -225,89 +235,76 @@ def run_nonlinear_analysis(
         )
     embedding_diagnostics = pd.DataFrame(diagnostic_records)
 
-    quality_figure = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=("Trustworthiness", "Continuity"),
-        shared_yaxes=True,
-    )
-    for column, metric in enumerate(("trustworthiness", "continuity"), start=1):
-        for method in METHODS:
-            rows = quality_records[
-                (quality_records["method"] == method)
-                & (quality_records["metric"] == metric)
-            ].sort_values("scope_value")
-            quality_figure.add_trace(
-                go.Scatter(
-                    x=rows["scope_value"],
-                    y=rows["value"],
-                    mode="lines+markers",
-                    name=method,
-                    legendgroup=method,
-                    showlegend=column == 1,
+    quality_figure = facet_figures(
+        {
+            metric.capitalize(): plot_scatter(
+                quality_records[quality_records["metric"] == metric].sort_values(
+                    "scope_value"
                 ),
-                row=1,
-                col=column,
+                x="scope_value",
+                y="value",
+                color="method",
+                mode="lines+markers",
+                xaxis_title="neighborhood size k",
+                yaxis_title="score",
             )
-    quality_figure.update_yaxes(range=[0, 1], title_text="score", row=1, col=1)
-    quality_figure.update_xaxes(title_text="neighborhood size k")
-    quality_figure.update_layout(
-        title="Local geometry across neighborhood scales", height=480, width=980
+            for metric in ("trustworthiness", "continuity")
+        },
+        n_cols=2,
+        title="Local geometry across neighborhood scales",
+        row_height=440,
     )
+    quality_figure.update_yaxes(range=[0, 1])
 
-    diagnostic_figure = go.Figure()
-    diagnostic_figure.add_bar(
-        x=embedding_diagnostics["method"],
-        y=embedding_diagnostics["subject_silhouette"],
-        name="subject",
+    silhouettes = embedding_diagnostics.melt(
+        id_vars="method",
+        value_vars=["subject_silhouette", "condition_silhouette"],
+        var_name="grouping",
+        value_name="silhouette",
     )
-    diagnostic_figure.add_bar(
-        x=embedding_diagnostics["method"],
-        y=embedding_diagnostics["condition_silhouette"],
-        name="condition",
-    )
-    diagnostic_figure.update_layout(
-        barmode="group",
+    silhouettes["grouping"] = silhouettes["grouping"].str.removesuffix("_silhouette")
+    diagnostic_figure = plot_grouped_bar(
+        silhouettes,
+        x="method",
+        y="silhouette",
+        group="grouping",
         title="What structures each embedding: participant or condition?",
         yaxis_title="silhouette score",
+        baseline=0.0,
     )
 
-    trajectory_figure = make_subplots(
-        rows=2,
-        cols=2,
-        subplot_titles=METHODS,
-        horizontal_spacing=0.1,
-        vertical_spacing=0.14,
-    )
-    for panel, method in enumerate(METHODS):
-        row, column = divmod(panel, 2)
-        for condition in CONDITIONS:
-            mean_trajectory = trajectories[method][trial_labels == condition].mean(
-                axis=0
+    condition_names = np.array([LABEL_NAMES[condition] for condition in CONDITIONS])
+    condition_color_map = {
+        LABEL_NAMES[condition]: CONDITION_COLORS[condition] for condition in CONDITIONS
+    }
+    condition_dash_map = {
+        LABEL_NAMES[condition]: CONDITION_DASHES[condition] for condition in CONDITIONS
+    }
+
+    def _condition_mean_paths(source: np.ndarray) -> np.ndarray:
+        """Stack condition-mean paths into plot_trajectory's (traj, time, dim)."""
+        return np.stack(
+            [source[trial_labels == condition].mean(axis=0)[:, :2] for condition in CONDITIONS]
+        )
+
+    trajectory_figure = facet_figures(
+        {
+            method: plot_trajectory(
+                _condition_mean_paths(trajectories[method]),
+                labels=condition_names,
+                color_map=condition_color_map,
+                linestyle_map=condition_dash_map,
+                dimensions=2,
+                show_markers=False,
+                axis_labels=["dimension 1", "dimension 2"],
+                title=method,
             )
-            trajectory_figure.add_trace(
-                go.Scatter(
-                    x=mean_trajectory[:, 0],
-                    y=mean_trajectory[:, 1],
-                    mode="lines",
-                    line={
-                        "color": CONDITION_COLORS[condition],
-                        "dash": CONDITION_DASHES[condition],
-                        "width": 3,
-                    },
-                    name=LABEL_NAMES[condition],
-                    legendgroup=str(condition),
-                    showlegend=panel == 0,
-                ),
-                row=row + 1,
-                col=column + 1,
-            )
-    trajectory_figure.update_xaxes(showticklabels=False, title_text="dimension 1")
-    trajectory_figure.update_yaxes(showticklabels=False, title_text="dimension 2")
-    trajectory_figure.update_layout(
+            for method in METHODS
+        },
+        n_cols=2,
         title="Condition-mean trajectories: compare shape, not coordinate scale",
-        height=850,
-        width=1000,
+        row_height=420,
+        shared_yaxes=False,
     )
 
     flow_embedding = flat_embeddings[flow_method]
@@ -337,40 +334,14 @@ def run_nonlinear_analysis(
             for condition in CONDITIONS
         ]
     )
-    nonzero = velocity_norm > 0
-    plot_scale = 1.0
-    if nonzero.any():
-        span = np.ptp(flow_embedding[:, :2], axis=0)
-        plot_scale = 0.04 * float(np.max(span)) / float(
-            np.percentile(velocity_norm[nonzero], 90)
-        )
-    velocity_figure = go.Figure()
-    shown = np.linspace(0, len(flow_embedding) - 1, min(180, len(flow_embedding)), dtype=int)
-    for index in shown:
-        if velocity_norm[index] == 0:
-            continue
-        condition = int(sample_labels[index])
-        velocity_figure.add_trace(
-            go.Scatter(
-                x=[
-                    flow_embedding[index, 0],
-                    flow_embedding[index, 0] + velocity[index, 0] * plot_scale,
-                ],
-                y=[
-                    flow_embedding[index, 1],
-                    flow_embedding[index, 1] + velocity[index, 1] * plot_scale,
-                ],
-                mode="lines",
-                line={"color": CONDITION_COLORS[condition], "width": 1},
-                opacity=0.35,
-                showlegend=False,
-            )
-        )
-    velocity_figure.update_layout(
+    velocity_figure = plot_streamlines(
+        flow_embedding[:, :2],
+        velocity[:, :2],
         title=f"Trial-safe descriptive flow in {flow_method} space",
-        xaxis_title="dimension 1",
-        yaxis_title="dimension 2",
+        random_state=seed,
     )
+    velocity_figure.update_xaxes(title_text="dimension 1")
+    velocity_figure.update_yaxes(title_text="dimension 2")
 
     alignment_components = min(10, X.shape[1])
     alignment = TemporalProcrustesAlignment(
@@ -411,38 +382,37 @@ def run_nonlinear_analysis(
         .agg(["mean", "sem"])
         .reset_index()
     )
-    alignment_figure = go.Figure(
-        go.Bar(
-            x=alignment_summary["representation"],
-            y=alignment_summary["mean"],
-            error_y={"type": "data", "array": alignment_summary["sem"]},
-        )
-    )
-    alignment_figure.update_layout(
+    # One point per participant rather than a bare bar: the spread is the
+    # result here, since alignment is claimed to make participants agree.
+    alignment_representations = list(alignment_summary["representation"])
+    alignment_figure = plot_group_scatter_with_mean(
+        [
+            alignment_consistency.loc[
+                alignment_consistency["representation"] == representation, "correlation"
+            ].to_numpy()
+            for representation in alignment_representations
+        ],
+        alignment_representations,
+        point_labels=[
+            alignment_consistency.loc[
+                alignment_consistency["representation"] == representation, "subject"
+            ].to_numpy()
+            for representation in alignment_representations
+        ],
         title="Alignment sensitivity: leave-one-subject trajectory consistency",
         yaxis_title="correlation",
+        baseline=0.0,
     )
 
-    aligned_trajectory_figure = go.Figure()
-    for condition in CONDITIONS:
-        mean_trajectory = aligned_trajectories[trial_labels == condition].mean(axis=0)
-        aligned_trajectory_figure.add_trace(
-            go.Scatter(
-                x=mean_trajectory[:, 0],
-                y=mean_trajectory[:, 1],
-                mode="lines",
-                line={
-                    "color": CONDITION_COLORS[condition],
-                    "dash": CONDITION_DASHES[condition],
-                    "width": 3,
-                },
-                name=LABEL_NAMES[condition],
-            )
-        )
-    aligned_trajectory_figure.update_layout(
+    aligned_trajectory_figure = plot_trajectory(
+        _condition_mean_paths(aligned_trajectories),
+        labels=condition_names,
+        color_map=condition_color_map,
+        linestyle_map=condition_dash_map,
+        dimensions=2,
+        show_markers=False,
+        axis_labels=["aligned PC1", "aligned PC2"],
         title="Condition trajectories after label-free temporal alignment",
-        xaxis_title="aligned PC1",
-        yaxis_title="aligned PC2",
     )
 
     balance_table = pd.DataFrame(balance_records)
@@ -529,30 +499,49 @@ def run_nonlinear_analysis(
         report_asset_mode = "cdn"
 
     # ── Overview ────────────────────────────────────────────────────────────
-    overview = Section("Overview", icon="O")
+    report.add_summary_card(
+        {
+            "Participants": len(complete_subjects),
+            "Methods": "PCA, UMAP, PHATE, Isomap",
+            "Samples per reducer": f"{len(samples):,}",
+            "Neighbors": neighbor_count,
+            "Velocity embedding": flow_method,
+        }
+    )
+
+    overview = Section(
+        "Overview",
+        icon="O",
+        description="PCA, UMAP, PHATE and Isomap on identical balanced observations",
+        metadata={
+            "Participants": f"{len(complete_subjects)} analyzable / {len(subjects)} requested",
+            "Conditions": ", ".join(LABEL_NAMES[c] for c in CONDITIONS),
+            "Trials per cell": str(selected_per_cell),
+            "Sensor tensor": str(tuple(X.shape)),
+            "Samples per reducer": f"{len(samples):,}",
+            "Window": f"{times[0]:.3f}–{times[-1]:.3f} s",
+            "Temporal stride": f"every {time_stride} sample(s)",
+            "Neighborhood scales": ", ".join(map(str, valid_k)),
+            "Velocity embedding": str(flow_method),
+            "Alignment components": str(alignment_components),
+        },
+    )
     overview.add_element(
         MarkdownElement(
             "This companion report follows the complete **10-step nonlinear "
             "EEGBCI trajectory workflow** from the tutorial notebook. PCA, UMAP, "
             "PHATE, and Isomap are fit to exactly the same balanced sensor-time "
             "observations. Every visualization is paired with the diagnostic or "
-            "assumption needed to interpret it.\n\n"
-            "| Parameter | Value |\n"
-            "|---|---|\n"
-            f"| Participants | {len(complete_subjects)} analyzable / "
-            f"{len(subjects)} requested |\n"
-            f"| Conditions | {', '.join(LABEL_NAMES[c] for c in CONDITIONS)} |\n"
-            f"| Trials per participant × condition | {selected_per_cell} |\n"
-            f"| Balanced sensor tensor | {tuple(X.shape)} |\n"
-            f"| Samples supplied to each reducer | {len(samples):,} |\n"
-            f"| Analysis window | {times[0]:.3f}–{times[-1]:.3f} s |\n"
-            f"| Temporal stride | every {time_stride} sample(s) |\n"
-            f"| Neighborhood scales | {', '.join(map(str, valid_k))} |\n"
-            f"| Velocity embedding | {flow_method} |\n"
-            f"| Alignment components | {alignment_components} |\n\n"
-            "> Each numbered section below corresponds directly to a numbered step "
-            "in `tutorial_eegbci_nonlinear.ipynb`. The report and "
-            "notebook use the same analysis choices and saved result tables."
+            "assumption needed to interpret it."
+        )
+    )
+    overview.add_element(
+        CalloutElement(
+            "Each numbered section corresponds directly to a numbered step in "
+            "`tutorial_eegbci_nonlinear.ipynb`. The report and notebook use the "
+            "same analysis choices and saved result tables.",
+            kind="info",
+            title="Mirrors the notebook",
         )
     )
     report.add_section(overview)
@@ -567,10 +556,15 @@ def run_nonlinear_analysis(
             "PCA and every nonlinear reducer receive this same sensor vector. We do "
             "not feed PCA scores into UMAP, PHATE, or Isomap, because doing so would "
             "give PCA an unacknowledged filtering role and make the comparison "
-            "asymmetric.\n\n"
-            "> **Fair-comparison rule:** The trials, time samples, channels, crop, "
-            "and normalization are fixed. Only the geometry-learning algorithm "
-            "changes."
+            "asymmetric."
+        )
+    )
+    step1.add_element(
+        CalloutElement(
+            "The trials, time samples, channels, crop, and normalization are fixed. "
+            "Only the geometry-learning algorithm changes.",
+            kind="info",
+            title="Fair-comparison rule",
         )
     )
     report.add_section(step1)
@@ -589,10 +583,15 @@ def run_nonlinear_analysis(
             "with extra trials would contribute extra time samples and exert more "
             "influence on every fitted space. We therefore retain participants with "
             "all four conditions and sample the same number of **whole trials** from "
-            "every participant × condition cell before temporal decimation.\n\n"
-            "> **Why whole trials?** Flattening first and sampling isolated time "
-            "points would distort temporal coverage, fragment trials, and invalidate "
-            "the velocity analysis."
+            "every participant × condition cell before temporal decimation."
+        )
+    )
+    step2.add_element(
+        CalloutElement(
+            "Flattening first and sampling isolated time points would distort temporal "
+            "coverage, fragment trials, and invalidate the velocity analysis.",
+            kind="info",
+            title="Why whole trials",
         )
     )
     step2.add_element(
@@ -640,11 +639,16 @@ def run_nonlinear_analysis(
             "shortcuts or disconnections |\n\n"
             f"UMAP and Isomap use **{neighbor_count} neighbors**. Random seeds are "
             "fixed for stochastic methods, and every fitted reducer is saved under "
-            "`reducers/`.\n\n"
-            "> **No common coordinate ruler:** A distance of 1 in PHATE is not "
-            "equivalent to a distance of 1 in PCA or UMAP. Cross-method comparisons "
-            "must use dimensionless validation metrics rather than raw embedded "
-            "distances."
+            "`reducers/`."
+        )
+    )
+    step4.add_element(
+        CalloutElement(
+            "A distance of 1 in PHATE is not equivalent to a distance of 1 in PCA or "
+            "UMAP. Cross-method comparisons must use dimensionless validation metrics "
+            "rather than raw embedded distances.",
+            kind="warning",
+            title="No common coordinate ruler",
         )
     )
     report.add_section(step4)
@@ -662,11 +666,31 @@ def run_nonlinear_analysis(
             "that the embedding separates.\n\n"
             "Both range from 0 to 1, with larger values indicating better local "
             "preservation. Crossing curves indicate that the preferred method "
-            "depends on neighborhood size.\n\n"
-            "> High trustworthiness or continuity supports geometric fidelity. It "
-            "does not establish a biological manifold, an attractor, predictive "
-            "condition information, or generalization to unseen participants."
+            "depends on neighborhood size."
         )
+    )
+    step5.add_element(
+        CalloutElement(
+            "High trustworthiness or continuity supports geometric fidelity. It does "
+            "not establish a biological manifold, an attractor, predictive condition "
+            "information, or generalization to unseen participants.",
+            kind="warning",
+            title="What the scores do not show",
+        )
+    )
+    best_geometry = quality_summary.loc[
+        quality_summary.groupby("metric")["value"].idxmax()
+    ]
+    step5.add_columns(
+        [
+            StatCardElement(
+                f"Best {row['metric']}",
+                f"{row['value']:.3f}",
+                delta=str(row["method"]),
+                color="green" if row["value"] > 0.85 else "yellow",
+            )
+            for _, row in best_geometry.iterrows()
+        ]
     )
     step5.add_element(PlotlyElement(quality_figure, height="520px"))
     step5.add_element(
@@ -701,10 +725,16 @@ def run_nonlinear_analysis(
             "Participant and condition silhouette scores diagnose these two sources "
             "of structure after unsupervised fitting. Values near 1 indicate compact, "
             "separated groups; values near 0 indicate overlap; negative values mean "
-            "many samples are closer to another group.\n\n"
-            "> **Descriptive, not inferential:** Repeated time samples from one trial "
-            "are dependent. These silhouettes are not p-values, independent-sample "
-            "effect estimates, or cross-validated decoding scores."
+            "many samples are closer to another group."
+        )
+    )
+    step6.add_element(
+        CalloutElement(
+            "Repeated time samples from one trial are dependent. These silhouettes are "
+            "not p-values, independent-sample effect estimates, or cross-validated "
+            "decoding scores.",
+            kind="warning",
+            title="Descriptive, not inferential",
         )
     )
     step6.add_element(PlotlyElement(diagnostic_figure, height="500px"))
@@ -724,12 +754,17 @@ def run_nonlinear_analysis(
             "Reducer fitting treated each sensor state as an unordered row. The "
             "embedding rows are now reshaped back to `(trial, time, dimension)` and "
             "averaged within condition. Execution is shown with solid lines, imagery "
-            "with dashed lines, and color identifies left versus right hand.\n\n"
-            "> **What can be compared:** Within a panel, inspect branching, loops, "
-            "return paths, and relative condition separation. Across panels, compare "
-            "qualitative topology only. PCA signs can flip, while nonlinear spaces "
-            "can rotate, reflect, warp, or rescale without violating their intended "
-            "geometry."
+            "with dashed lines, and color identifies left versus right hand."
+        )
+    )
+    step7.add_element(
+        CalloutElement(
+            "Within a panel, inspect branching, loops, return paths, and relative "
+            "condition separation. Across panels, compare qualitative topology only. "
+            "PCA signs can flip, while nonlinear spaces can rotate, reflect, warp, or "
+            "rescale without violating their intended geometry.",
+            kind="tip",
+            title="What can be compared",
         )
     )
     step7.add_element(PlotlyElement(trajectory_figure, height="900px"))
@@ -746,11 +781,16 @@ def run_nonlinear_analysis(
             "`compute_velocity_fields` receives both the trial identifier and the "
             "within-trial time coordinate. It computes valid temporal differences and "
             f"then pools local displacements in **{flow_method} space**. Trial "
-            "endpoints naturally have no forward difference.\n\n"
-            "> **Descriptive flow, not a fitted dynamical system:** Arrow lengths "
-            "inherit the arbitrary scale of the selected embedding. The field does "
-            "not estimate a differential equation, demonstrate an attractor, or "
-            "support raw speed comparisons across reducers."
+            "endpoints naturally have no forward difference."
+        )
+    )
+    step8.add_element(
+        CalloutElement(
+            "Arrow lengths inherit the arbitrary scale of the selected embedding. The "
+            "field does not estimate a differential equation, demonstrate an attractor, "
+            "or support raw speed comparisons across reducers.",
+            kind="warning",
+            title="Descriptive flow, not a fitted dynamical system",
         )
     )
     step8.add_element(PlotlyElement(velocity_figure, height="620px"))
@@ -778,22 +818,37 @@ def run_nonlinear_analysis(
             "Each participant's mean temporal pattern is correlated with the mean of "
             "all other participants before and after rotation. An increase supports "
             "the shared-rotated-pattern assumption; it does not prove identical neural "
-            "generators.\n\n"
-            "> **Transductive-analysis warning:** All displayed participants contribute "
-            "to this descriptive fit. Prediction for unseen participants requires a "
-            "training-only reference and label-free test-participant calibration, as "
-            "implemented in the decoding tutorial."
+            "generators."
         )
     )
-    step9.add_element(PlotlyElement(alignment_figure, height="500px"))
     step9.add_element(
+        CalloutElement(
+            "All displayed participants contribute to this descriptive fit. Prediction "
+            "for unseen participants requires a training-only reference and label-free "
+            "test-participant calibration, as implemented in the decoding tutorial.",
+            kind="warning",
+            title="Transductive-analysis warning",
+        )
+    )
+    consistency_panel = ContainerElement()
+    consistency_panel.add_element(PlotlyElement(alignment_figure, height="500px"))
+    consistency_panel.add_element(
         InteractiveTableElement(
             alignment_summary,
             title="Cross-participant consistency before and after alignment",
             selector_columns=["representation"],
         )
     )
-    step9.add_element(PlotlyElement(aligned_trajectory_figure, height="620px"))
+    step9.add_element(
+        TabsElement(
+            {
+                "Consistency before/after": consistency_panel,
+                "Aligned trajectories": PlotlyElement(
+                    aligned_trajectory_figure, height="620px"
+                ),
+            }
+        )
+    )
     alignment_appendix = AccordionElement(
         "Details: leave-one-participant consistency values",
         open=False,
@@ -832,12 +887,17 @@ def run_nonlinear_analysis(
             "3. participant identity does not silently dominate the condition story;\n"
             "4. comparisons remain within one embedding's coordinate system;\n"
             "5. temporal calculations respect trial boundaries; and\n"
-            "6. alignment conclusions remain within their transductive scope.\n\n"
-            "> **Main takeaway:** Nonlinear embeddings are complementary views of "
-            "sensor-space geometry. Prefer conclusions that remain coherent across "
-            "geometry validation, participant diagnostics, temporal reconstruction, "
-            "and alignment sensitivity—not conclusions that depend on one visually "
-            "striking panel."
+            "6. alignment conclusions remain within their transductive scope."
+        )
+    )
+    step10.add_element(
+        CalloutElement(
+            "Nonlinear embeddings are complementary views of sensor-space geometry. "
+            "Prefer conclusions that remain coherent across geometry validation, "
+            "participant diagnostics, temporal reconstruction, and alignment "
+            "sensitivity — not conclusions that depend on one visually striking panel.",
+            kind="tip",
+            title="Main takeaway",
         )
     )
     all_tables = AccordionElement("Appendix: all exported analysis tables", open=False)
