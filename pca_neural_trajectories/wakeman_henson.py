@@ -52,6 +52,12 @@ MEG_SENSOR_SETS: dict[str, tuple[str, ...] | None] = {
         "Left-temporal",
         "Right-temporal",
     ),
+    # Right-lateralised variants. The face response is right-dominant, so these
+    # ask whether the effects survive in the hemisphere that carries them
+    # rather than being diluted by the contralateral sensors.
+    "sensors_right_temporal": ("Right-temporal",),
+    "sensors_right_occipital": ("Right-occipital",),
+    "sensors_right_occipito_temporal": ("Right-occipital", "Right-temporal"),
 }
 
 # ``ds000117`` events.tsv carries a ``stim_type`` string *and* a ``trigger``
