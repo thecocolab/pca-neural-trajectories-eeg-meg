@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCA Neural Trajectories — Results</title>
+<meta name="description" content="Interactive analysis reports for the PCA-based trajectory analysis tutorial series for EEG and MEG.">
+<style>
+  /* ---- design tokens ------------------------------------------------- */
+  :root {
+    --bg: #ffffff;
+    --surface: #f7f8f9;
+    --text: #16191d;
+    --muted: #5f6771;
+    --border: #e0e3e7;
+    --accent: #1f4e79;
+    --accent-soft: #eaf0f6;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --width: 880px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a;
+      --surface: #1b1f23;
+      --text: #e6e9ec;
+      --muted: #9aa3ad;
+      --border: #2c3238;
+      --accent: #7fb2e0;
+      --accent-soft: #1e2831;
+    }
+  }
+
+  /* ---- base ---------------------------------------------------------- */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0 1.25rem 5rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: var(--width); margin: 0 auto; }
+  a { color: var(--accent); }
+  h1, h2, h3 { line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+
+  /* ---- header -------------------------------------------------------- */
+  header { padding: 4rem 0 2rem; border-bottom: 1px solid var(--border); }
+  header h1 { margin: 0 0 .5rem; font-size: 1.9rem; }
+  header .subtitle { margin: 0 0 1.5rem; color: var(--muted); font-size: 1.05rem; }
+  header p { margin: 0 0 1rem; }
+  .links { display: flex; flex-wrap: wrap; gap: 1.25rem; font-size: .9rem; margin-top: 1.5rem; }
+
+  /* ---- dataset tabs -------------------------------------------------- */
+  .tabs {
+    display: flex; flex-wrap: wrap; gap: .5rem;
+    margin: 2.5rem 0 1.5rem;
+  }
+  .tab {
+    flex: 1 1 240px;
+    text-align: left;
+    padding: .9rem 1.1rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  .tab .tab-sub { display: block; font-size: .8rem; font-weight: 400; color: var(--muted); margin-top: .15rem; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); }
+
+  /* ---- dataset panels ------------------------------------------------ */
+  .dataset[hidden] { display: none; }
+  .dataset > .blurb { color: var(--muted); font-size: .95rem; margin: 0 0 1.75rem; }
+
+  .filter {
+    width: 100%;
+    padding: .55rem .75rem;
+    margin-bottom: 1.5rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: .9rem;
+  }
+  .filter:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  /* ---- groups (accordions) ------------------------------------------- */
+  details.group {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: .75rem;
+    background: var(--bg);
+  }
+  details.group[hidden] { display: none; }
+  details.group > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: .85rem 1.1rem;
+    display: flex;
+    align-items: baseline;
+    gap: .6rem;
+    font-weight: 600;
+  }
+  details.group > summary::-webkit-details-marker { display: none; }
+  details.group > summary::before {
+    content: "▸";
+    color: var(--muted);
+    font-size: .8rem;
+    transition: transform .15s;
+  }
+  details.group[open] > summary::before { transform: rotate(90deg); }
+  details.group[open] > summary { border-bottom: 1px solid var(--border); }
+  summary .count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: .75rem;
+    font-weight: 400;
+    color: var(--muted);
+  }
+  .group-blurb {
+    margin: 0;
+    padding: .85rem 1.1rem .25rem;
+    color: var(--muted);
+    font-size: .88rem;
+  }
+
+  /* ---- report links -------------------------------------------------- */
+  ul.reports { list-style: none; margin: 0; padding: .5rem .6rem .6rem; }
+  ul.reports li[hidden] { display: none; }
+  a.report {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .3rem .75rem;
+    padding: .5rem .5rem;
+    border-radius: 4px;
+    text-decoration: none;
+    color: inherit;
+  }
+  a.report:hover { background: var(--surface); }
+  a.report .label { font-weight: 500; color: var(--accent); }
+  a.report .desc { color: var(--muted); font-size: .85rem; flex: 1 1 14rem; }
+  a.report .size { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
+  .empty { padding: .6rem 1.1rem 1rem; color: var(--muted); font-size: .9rem; }
+
+  /* ---- footer -------------------------------------------------------- */
+  footer {
+    max-width: var(--width);
+    margin: 3rem auto 0;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .82rem;
+  }
+  footer code { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>A Primer on Low-Dimensional Neural Dynamics</h1>
+  <p class="subtitle">PCA-based trajectory analysis for EEG and MEG — interactive analysis reports</p>
+
+  <p>
+    Averaging across sensors hides the fact that an evoked response is a <em>path</em>: the sensor
+    pattern moves through a state space over time. These analyses fit a principal-component basis to
+    sensor-space data, plot the resulting condition trajectories, and test how far that compact
+    coordinate system carries — through geometric descriptors, nonlinear-embedding comparisons,
+    frequency-band envelopes, and leakage-safe cross-participant decoding.
+  </p>
+  <p>
+    Every link below opens a self-contained interactive report: figures, tables, statistics, and the
+    provenance of the run that produced them. Pick a dataset, then a family of analyses.
+  </p>
+
+  <nav class="links">
+    <!-- TODO: point this at the public repository URL before publishing. -->
+    <a href="https://github.com/">Code &amp; tutorials</a>
+    <a href="https://physionet.org/content/eegmmidb/1.0.0/">PhysioNet EEGMMIDB</a>
+    <a href="https://openneuro.org/datasets/ds000117">OpenNeuro ds000117</a>
+  </nav>
+</header>
+
+<div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" aria-controls="panel-eegbci" data-panel="panel-eegbci">EEG BCI<span class="tab-sub">PhysioNet motor movement/imagery, 106 participants</span></button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="panel-megfaces" data-panel="panel-megfaces">MEG Faces<span class="tab-sub">Wakeman–Henson ds000117, 16 participants</span></button>
+</div>
+
+  <section class="dataset" id="panel-eegbci" role="tabpanel">
+    <p class="blurb">The PhysioNet EEG Motor Movement/Imagery Database: 64-channel EEG recorded while participants executed or imagined left-hand, right-hand, and both-hands movements cued by a visual target. The full cohort analysed here is 106 participants.</p>
+    <input class="filter" type="search" placeholder="Filter reports…" aria-label="Filter reports">
+    <details class="group" open>
+      <summary>Main trajectory analysis<span class="count">1 report</span></summary>
+      <p class="group-blurb">One shared PCA basis for all conditions: trajectories, variance accounted for, geometric descriptors, and group-level contrasts.</p>
+      <ul class="reports">
+        <li><a class="report" href="reports/eegbci/main/overview.html"><span class="label">Full report</span><span class="desc">EEGBCI — PCA Neural Trajectories (106 subjects)</span><span class="size">7.9 MB</span></a></li>
+      </ul>
+    </details>
+    <details class="group">
+      <summary>Decoding<span class="count">5 reports</span></summary>
+      <p class="group-blurb">Subject-disjoint temporal decoding from raw sensors versus fold-local Procrustes-aligned components. One sweep report covers all contrasts; the rest break out a single contrast.</p>
+      <ul class="reports">
+        <li><a class="report" href="reports/eegbci/decoding/overview.html"><span class="label">All contrasts (full sweep)</span><span class="desc">EEGBCI — Cross-Participant Temporal Decoding (106 participants, 4 contrasts)</span><span class="size">20.7 MB</span></a></li>
+        <li><a class="report" href="reports/eegbci/decoding/4class_3_4_5_6.html"><span class="label">4-class (runs 3/4/5/6)</span><span class="desc">EEGBCI — Cross-Participant Temporal Decoding (106 participants)</span><span class="size">8.9 MB</span></a></li>
+        <li><a class="report" href="reports/eegbci/decoding/hands_exec_vs_hands_imag.html"><span class="label">Hands: execution vs imagery</span><span class="desc">EEGBCI — Cross-Participant Temporal Decoding (106 participants)</span><span class="size">8.1 MB</span></a></li>
+        <li><a class="report" href="reports/eegbci/decoding/left_hand_exec_vs_right_hand_exec.html"><span class="label">Left vs right hand (execution)</span><span class="desc">EEGBCI — Cross-Participant Temporal Decoding (106 participants)</span><span class="size">8.1 MB</span></a></li>
+        <li><a class="report" href="reports/eegbci/decoding/left_hand_imag_vs_right_hand_imag.html"><span class="label">Left vs right hand (imagery)</span><span class="desc">EEGBCI — Cross-Participant Temporal Decoding (106 participants)</span><span class="size">8.1 MB</span></a></li>
+      </ul>
+    </details>
+    <details class="group">
+      <summary>Nonlinear embeddings<span class="count">1 report</span></summary>
+      <p class="group-blurb">PCA compared against UMAP, PHATE, and Isomap on the same observations, with trial-respecting velocity fields and label-free subject-space alignment.</p>
+      <ul class="reports">
+        <li><a class="report" href="reports/eegbci/nonlinear/overview.html"><span class="label">Full report</span><span class="desc">EEGBCI — Nonlinear Neural Trajectories (20 participants)</span><span class="size">4.7 MB</span></a></li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="dataset" id="panel-megfaces" role="tabpanel" hidden>
+    <p class="blurb">The Wakeman–Henson multimodal face dataset (OpenNeuro ds000117): 306-channel MEG recorded while participants viewed famous, unfamiliar, and scrambled faces. Each analysis is repeated over four sensor selections, which are helmet-position subsets rather than source-localized regions.</p>
+    <input class="filter" type="search" placeholder="Filter reports…" aria-label="Filter reports">
+    <details class="group" open>
+      <summary>Main trajectory analysis<span class="count">4 reports</span></summary>
+      <p class="group-blurb">One broadband PCA space shared by Famous, Unfamiliar, and Scrambled. Planned contrasts are derived views of that space, never refitted bases.</p>
+      <ul class="reports">
+        <li><a class="report" href="reports/megfaces/main/all_sensors.html"><span class="label">All sensors</span><span class="desc">MEG Faces Main Analysis - all_sensors (16 participants)</span><span class="size">5.8 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/main/sensors_right_occipito_temporal.html"><span class="label">Right occipito-temporal</span><span class="desc">MEG Faces Main Analysis - sensors_right_occipito_temporal (16 participants)</span><span class="size">5.8 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/main/sensors_right_occipital.html"><span class="label">Right occipital</span><span class="desc">MEG Faces Main Analysis - sensors_right_occipital (16 participants)</span><span class="size">5.8 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/main/sensors_right_temporal.html"><span class="label">Right temporal</span><span class="desc">MEG Faces Main Analysis - sensors_right_temporal (16 participants)</span><span class="size">5.8 MB</span></a></li>
+      </ul>
+    </details>
+    <details class="group">
+      <summary>Decoding<span class="count">4 reports</span></summary>
+      <p class="group-blurb">Leakage-safe cross-participant temporal decoding on noise-whitened MEG, with sensors as the baseline representation and transductive alignment marked as such.</p>
+      <ul class="reports">
+        <li><a class="report" href="reports/megfaces/decoding/all_sensors.html"><span class="label">All sensors</span><span class="desc">MEG Faces - Cross-Participant Temporal Decoding - all_sensors (16 participants, 4 contrasts)</span><span class="size">9.2 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/decoding/sensors_right_occipito_temporal.html"><span class="label">Right occipito-temporal</span><span class="desc">MEG Faces - Cross-Participant Temporal Decoding - sensors_right_occipito_temporal (16 participants, 4 contrasts)</span><span class="size">9.2 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/decoding/sensors_right_occipital.html"><span class="label">Right occipital</span><span class="desc">MEG Faces - Cross-Participant Temporal Decoding - sensors_right_occipital (16 participants, 4 contrasts)</span><span class="size">9.2 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/decoding/sensors_right_temporal.html"><span class="label">Right temporal</span><span class="desc">MEG Faces - Cross-Participant Temporal Decoding - sensors_right_temporal (16 participants, 4 contrasts)</span><span class="size">9.2 MB</span></a></li>
+      </ul>
+    </details>
+    <details class="group">
+      <summary>Power bands (spectral envelopes)<span class="count">4 reports</span></summary>
+      <p class="group-blurb">Alpha, beta, and 30–45 Hz low-gamma Hilbert amplitude envelopes, computed from the padded derivative set so filter and Hilbert edges stay outside the analysis window.</p>
+      <ul class="reports">
+        <li><a class="report" href="reports/megfaces/spectral/all_sensors.html"><span class="label">All sensors</span><span class="desc">MEG Faces Spectral Envelopes - all_sensors (16 participants)</span><span class="size">5.6 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/spectral/sensors_right_occipito_temporal.html"><span class="label">Right occipito-temporal</span><span class="desc">MEG Faces Spectral Envelopes - sensors_right_occipito_temporal (16 participants)</span><span class="size">5.6 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/spectral/sensors_right_occipital.html"><span class="label">Right occipital</span><span class="desc">MEG Faces Spectral Envelopes - sensors_right_occipital (16 participants)</span><span class="size">5.6 MB</span></a></li>
+        <li><a class="report" href="reports/megfaces/spectral/sensors_right_temporal.html"><span class="label">Right temporal</span><span class="desc">MEG Faces Spectral Envelopes - sensors_right_temporal (16 participants)</span><span class="size">5.6 MB</span></a></li>
+      </ul>
+    </details>
+  </section>
+
+</main>
+
+<footer>
+  <p>
+    Reports are static HTML with embedded Plotly figures; several are 5–20&nbsp;MB and take a moment
+    to render. Sensor-set names (right occipital, right temporal, right occipito-temporal) are
+    sensor-position subsets of the Neuromag helmet, not source-localized cortical regions.
+  </p>
+  <p>Generated by <code>website/build.py</code> from <code>outputs/v2</code> on 2026-08-13.</p>
+</footer>
+
+<script>
+  // Dataset tabs.
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(tab => tab.addEventListener('click', () => {
+    tabs.forEach(other => {
+      const selected = other === tab;
+      other.setAttribute('aria-selected', selected);
+      document.getElementById(other.dataset.panel).hidden = !selected;
+    });
+  }));
+
+  // Filter reports by name within the visible dataset.
+  document.querySelectorAll('.filter').forEach(input => {
+    input.addEventListener('input', () => {
+      const query = input.value.trim().toLowerCase();
+      input.closest('.dataset').querySelectorAll('details.group').forEach(group => {
+        let matches = 0;
+        group.querySelectorAll('li').forEach(item => {
+          const hit = !query || item.textContent.toLowerCase().includes(query);
+          item.hidden = !hit;
+          matches += hit ? 1 : 0;
+        });
+        group.hidden = matches === 0;
+        if (query) group.open = true;
+      });
+    });
+  });
+</script>
+</body>
+</html>
