@@ -54,9 +54,14 @@ from pca_neural_trajectories.wakeman_henson import (
 
 CONDITIONS = (1, 2, 3)
 FOCUSED_PAIRS = {"Famous vs Unfamiliar": (1, 2), "Famous vs Scrambled": (1, 3)}
+DEFAULT_SENSOR_SET = "sensors_right_occipital"
 FINAL_WINDOW = (-0.2, 0.8)
 BASELINE_WINDOW = (-0.2, 0.0)
 ACTIVE_WINDOW = (0.0, 0.6)
+# PCA bases are fit only on this window (baseline through 600 ms) and then
+# applied (transform) to the full epoch, so the fitted subspace isn't diluted
+# by the 0.6-0.8 s tail while baseline-relative scores stay available.
+FIT_WINDOW = (-0.2, 0.6)
 ENVELOPE_SFREQ = 62.5
 SMOOTHING_S = 0.04
 CONDITION_COLORS = {1: "#0072B2", 2: "#D55E00", 3: "#009E73"}
@@ -118,7 +123,7 @@ def run_spectral_analysis(
     n_perm: int = 200,
     seed: int = 42,
     prepare: bool = False,
-    sensor_set: str = "all_sensors",
+    sensor_set: str = DEFAULT_SENSOR_SET,
 ) -> dict[str, object]:
     """Run the notebook-equivalent analysis and write the complete report bundle."""
     if metric_pca_mode not in {"shared", "subject", "both"}:
@@ -139,8 +144,9 @@ def run_spectral_analysis(
     rng = np.random.default_rng(seed)
 
     if prepare:
+        # Default 0.1 Hz high-pass as for the broadband derivatives; only the
+        # low-pass, epoch window and baseline differ.
         config = preprocessing_config(
-            l_freq=0.5,
             h_freq=90.0,
             sfreq=250.0,
             tmin=-1.2,
@@ -336,17 +342,30 @@ def run_spectral_analysis(
 
     figures: dict[str, go.Figure] = {"power_transformation": fig_transform}
     # One panel per band; participants grouped by condition give mean + SEM.
+    # Also kept tidy (band/condition/subject/time) so the sensor-space ERP
+    # panel can be reloaded and restyled later without rerunning the analysis.
     sensor_panels = {}
+    sensor_power_rows = []
     for band, data in band_data.items():
         curves, groups = [], []
         for condition in CONDITIONS:
             for subject in subjects:
-                curves.append(
-                    data["X"][
-                        (data["subjects"] == subject) & (data["labels"] == condition)
-                    ].mean(axis=(0, 1))
-                )
+                curve = data["X"][
+                    (data["subjects"] == subject) & (data["labels"] == condition)
+                ].mean(axis=(0, 1))
+                curves.append(curve)
                 groups.append(LABEL_NAMES[condition])
+                sensor_power_rows.append(
+                    pd.DataFrame(
+                        {
+                            "band": band,
+                            "condition": LABEL_NAMES[condition],
+                            "subject": subject,
+                            "time_s": data["times"],
+                            "power_db": curve,
+                        }
+                    )
+                )
         sensor_panels[band] = plot_timecourses(
             np.asarray(curves)[:, np.newaxis, :],
             times=data["times"],
@@ -358,6 +377,7 @@ def run_spectral_analysis(
             ylabel="Power (dB re baseline)",
             title=band,
         )
+    sensor_power_timeseries = pd.concat(sensor_power_rows, ignore_index=True)
     fig_sensor = facet_figures(
         sensor_panels,
         n_cols=1,
@@ -383,8 +403,11 @@ def run_spectral_analysis(
         X = data["X"]
         n_trials, n_sensors, n_times = X.shape
         pooled = X.transpose(0, 2, 1).reshape(n_trials * n_times, n_sensors)
+        fit_mask = (data["times"] >= FIT_WINDOW[0]) & (data["times"] <= FIT_WINDOW[1])
+        pooled_fit = X[:, :, fit_mask].transpose(0, 2, 1).reshape(-1, n_sensors)
         pca = DimReduction(method="PCA", n_components=n_components, random_state=seed)
-        scores = pca.fit_transform(pooled).reshape(n_trials, n_times, n_components)
+        pca.fit(pooled_fit)
+        scores = pca.transform(pooled).reshape(n_trials, n_times, n_components)
         baseline = data["times"] < 0
         scores -= scores[:, baseline].mean(axis=1, keepdims=True)
         evr = np.asarray(pca.get_diagnostics()["explained_variance_ratio_"])
@@ -404,8 +427,12 @@ def run_spectral_analysis(
                 rows = data["subjects"] == subject
                 X_subject = X[rows]
                 matrix = X_subject.transpose(0, 2, 1).reshape(-1, n_sensors)
+                matrix_fit = X_subject[:, :, fit_mask].transpose(0, 2, 1).reshape(
+                    -1, n_sensors
+                )
                 reducer = DimReduction(method="PCA", n_components=n_components, random_state=seed)
-                transformed = reducer.fit_transform(matrix).reshape(
+                reducer.fit(matrix_fit)
+                transformed = reducer.transform(matrix).reshape(
                     len(X_subject), n_times, n_components
                 )
                 transformed -= transformed[:, baseline].mean(axis=1, keepdims=True)
@@ -534,6 +561,7 @@ def run_spectral_analysis(
             dimensions=2,
             show_markers=True,
             add_start_end_markers=True,
+            axis_labels=["PC1", "PC2"],
         )
         figures[f"{band}_trajectories_3d"] = plot_trajectory(
             X=group[..., :3],
@@ -545,6 +573,7 @@ def run_spectral_analysis(
             show_markers=True,
             add_start_end_markers=True,
             height=650,
+            axis_labels=["PC1", "PC2", "PC3"],
         )
 
         contrast_panels = {}
@@ -559,6 +588,7 @@ def run_spectral_analysis(
                     color_map={f"sub-{subject}": color for subject in subjects},
                     title=f"{space}: {contrast}",
                     ylabel="Baseline-relative distance",
+                    xaxis_title="Time (s)",
                 )
                 participants.update_traces(line={"width": 1}, showlegend=False)
                 group = plot_timecourses(
@@ -625,6 +655,7 @@ def run_spectral_analysis(
                 color_map={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
                 title=space,
                 ylabel="Speed (a.u./s)",
+                xaxis_title="Time (s)",
             )
             participants.update_traces(line={"width": 1}, showlegend=False)
             group = plot_timecourses(
@@ -672,8 +703,12 @@ def run_spectral_analysis(
             X_pair = data["X"][keep]
             labels_pair = data["labels"][keep]
             subjects_pair = data["subjects"][keep]
+            pair_fit_mask = (data["times"] >= FIT_WINDOW[0]) & (data["times"] <= FIT_WINDOW[1])
             pca = DimReduction(method="PCA", n_components=n_components, random_state=seed)
-            scores = pca.fit_transform(
+            pca.fit(
+                X_pair[:, :, pair_fit_mask].transpose(0, 2, 1).reshape(-1, X_pair.shape[1])
+            )
+            scores = pca.transform(
                 X_pair.transpose(0, 2, 1).reshape(-1, X_pair.shape[1])
             ).reshape(len(X_pair), X_pair.shape[2], n_components)
             baseline = data["times"] < 0
@@ -753,6 +788,7 @@ def run_spectral_analysis(
                 dimensions=2,
                 show_markers=True,
                 add_start_end_markers=True,
+                axis_labels=["PC1", "PC2"],
             )
     focused_summary = pd.DataFrame(focused_rows)
     focused_group = focused_summary.groupby(["band", "focused_space"], as_index=False).agg(
@@ -864,6 +900,7 @@ def run_spectral_analysis(
         "pca_diagnostics": pca_diagnostics,
         "subject_pca_variance": subject_variance,
         "sensor_loadings": loadings,
+        "sensor_power_timeseries": sensor_power_timeseries,
         "planned_contrasts": metric_summary,
         "planned_contrasts_group": metric_group,
         "planned_contrast_timeseries": metric_timeseries,
@@ -922,7 +959,7 @@ def run_spectral_analysis(
         {
             "Participants": len(subjects),
             "Bands": len(SPECTRAL_BANDS),
-            "Sensors": f"{len(source_channels)} ({sensor_set})",
+            "Sensors": str(len(source_channels)),
             "PCA mode": str(metric_pca_mode),
             "Permutations": n_perm,
         }
@@ -1135,6 +1172,7 @@ def run_spectral_analysis(
         "final_window": list(FINAL_WINDOW),
         "baseline_window": list(BASELINE_WINDOW),
         "active_window": list(ACTIVE_WINDOW),
+        "pca_fit_window": list(FIT_WINDOW),
         "envelope_sfreq": ENVELOPE_SFREQ,
         "smoothing_s": SMOOTHING_S,
         "metric_pca_mode": metric_pca_mode,
@@ -1152,7 +1190,12 @@ def run_spectral_analysis(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--subjects", nargs="*", default=["01", "02", "03"])
+    parser.add_argument(
+        "--subjects",
+        nargs="*",
+        default=[f"{subject:02d}" for subject in range(1, 17)],
+        help="Participant IDs (default: all 16).",
+    )
     parser.add_argument("--raw-root", type=Path, default=Path.home() / "mne_data" / "ds000117")
     parser.add_argument(
         "--derivatives-root",
@@ -1163,7 +1206,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--sensor-set",
         choices=tuple(MEG_SENSOR_SETS),
-        default="all_sensors",
+        default=DEFAULT_SENSOR_SET,
     )
     parser.add_argument("--metric-pca-mode", choices=("shared", "subject", "both"), default="both")
     parser.add_argument("--n-components", type=int, default=10)

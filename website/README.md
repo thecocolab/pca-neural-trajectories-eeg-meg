@@ -16,7 +16,7 @@ website/
 ```bash
 python3 website/build.py                 # incremental: copies new/changed reports only
 python3 website/build.py --clean         # rebuild reports/ from scratch
-python3 website/build.py --source outputs/v3
+python3 website/build.py --source outputs/release
 ```
 
 Re-run it whenever more reports finish transferring. Reports that are not there yet are

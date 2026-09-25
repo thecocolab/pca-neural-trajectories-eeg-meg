@@ -1,7 +1,7 @@
 """Multi-contrast decoding sweeps: specs, slugs, and figure faceting.
 
 The decoding scripts run one classification target per call. A *sweep* runs
-several targets — the four contrasts `FINDINGS.md` reports for each dataset —
+several targets — the four contrasts reported for each dataset —
 and reports them side by side, so a claim like "Famous and Unfamiliar behave
 identically against Scrambled" is one glance rather than four files.
 
@@ -134,8 +134,8 @@ def contrast_label(
 ) -> str:
     """Human-readable contrast name, e.g. ``"Famous vs Scrambled"``.
 
-    Three or more conditions are labelled as multiclass, matching how
-    `FINDINGS.md` reports the three-class row alongside the binaries. Panel
+    Three or more conditions are labelled as multiclass, so the three-class
+    row reads naturally alongside the binaries. Panel
     titles pass ``short=True`` to get the bare ``"3-class"`` rather than the
     full class list, which does not fit above a subplot.
     """

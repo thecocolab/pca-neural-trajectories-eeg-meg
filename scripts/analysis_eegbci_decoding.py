@@ -91,7 +91,7 @@ from pca_neural_trajectories import (
 
 SEED = 42
 DEFAULT_CONDITIONS = (3, 4)
-# The four contrasts FINDINGS.md reports for EEGBCI: the three documented
+# The four contrasts reported for EEGBCI: the three documented
 # binaries plus a 4-class target, mirroring the MEG sweep's shape.
 DEFAULT_CONTRASTS: tuple[tuple[int, ...], ...] = ((3, 4), (5, 6), (7, 9), (3, 4, 5, 6))
 # Faceted one panel per contrast in the sweep report. `fold_heatmaps` is
@@ -252,6 +252,19 @@ def _stack(*elements: Element) -> ContainerElement:
     return box
 
 
+def _within_subject_ceiling(scores: pd.DataFrame) -> float:
+    """Peak of the across-participant mean within-participant curve.
+
+    This is the curve drawn in the ceiling figure, and it is a group-mean curve
+    like the LOSO peaks it is compared with. The best single participant's own
+    peak would be a maximum over participants of a maximum over latencies - an
+    extreme value, not a ceiling. In a sweep the highest contrast is reported,
+    matching the other headline peaks.
+    """
+    keys = ["Contrast", "Time"] if "Contrast" in scores else ["Time"]
+    return float(scores.groupby(keys)["Mean"].mean().max())
+
+
 def _headline_metrics(
     tables: dict[str, pd.DataFrame],
     context: dict[str, object],
@@ -272,7 +285,7 @@ def _headline_metrics(
     metrics["Best peak BA"] = f"{best['peak_balanced_accuracy']:.3f}"
     metrics["Sensors peak BA"] = f"{sensors:.3f}"
     metrics["Within-participant ceiling"] = (
-        f"{tables['within_subject_peaks']['peak_balanced_accuracy'].max():.3f}"
+        f"{_within_subject_ceiling(tables['within_subject_scores']):.3f}"
     )
     metrics["Significant comparisons"] = f"{int(significant.sum())}/{len(significant)}"
     return metrics
@@ -758,7 +771,7 @@ def build_decoding_report(
     step11.add_element(
         MarkdownElement("Three checks bound what any alignment gain can mean.")
     )
-    ceiling = tables["within_subject_peaks"]["peak_balanced_accuracy"].max()
+    ceiling = _within_subject_ceiling(tables["within_subject_scores"])
     loso_sensors = tables["peak_summary"].loc[
         tables["peak_summary"]["Representation"] == "Sensors", "peak_balanced_accuracy"
     ].max()
@@ -1105,8 +1118,7 @@ def run_decoding_analysis(
 
     # Paired permutation significance, at every latency: is each representation's
     # balanced accuracy different from Sensors, and (for the headline aligned
-    # variant) from Shared PCA — the two questions FINDINGS.md's original EEG
-    # validation answered. This swaps whole held-out-participant predictions
+    # variant) from Shared PCA. This swaps whole held-out-participant predictions
     # between the two already-fitted experiments, so it costs no extra model
     # fits — cheap even at n_permutations=200.
     # `n_bootstraps` sets the confidence interval's resampling budget and
@@ -1150,6 +1162,11 @@ def run_decoding_analysis(
                 f"({n_permutations} shuffles, max-stat corrected)"
             ),
         )
+        significance_figures[figure_key].update_xaxes(title_text="time from movement cue (s)")
+        significance_figures[figure_key].update_yaxes(
+            title_text="balanced accuracy difference"
+        )
+        significance_figures[figure_key].update_layout(margin_l=80)
     significance_assessment = pd.concat(significance_frames, ignore_index=True)
     significance_summary = (
         significance_assessment.loc[
@@ -1753,7 +1770,9 @@ def run_contrast_sweep(
         sweep_figures[name] = facet_figures(
             ordered,
             n_cols=2,
-            title=(per_contrast[labels[0]].layout.title.text or name),
+            # Panel titles lead with their own contrast ("A versus B: ...");
+            # the grid shows every contrast, so keep only the shared part.
+            title=(per_contrast[labels[0]].layout.title.text or name).split(": ")[-1],
             row_height=400,
             # Chance level differs between binary and multiclass panels, so a
             # shared y-axis would misplace the reference line.
@@ -1851,7 +1870,12 @@ def run_contrast_sweep(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--subjects", nargs="*", type=int)
-    parser.add_argument("--n-subjects", type=int, default=10)
+    parser.add_argument(
+        "--n-subjects",
+        type=int,
+        default=None,
+        help="Use the first N usable participants (default: all 106).",
+    )
     parser.add_argument("--bids-root", type=Path, default=Path("PhysioNet_EEGBCI/BIDS"))
     parser.add_argument(
         "--output",
@@ -1912,7 +1936,9 @@ def main(argv: list[str] | None = None) -> None:
             for subject in range(1, 110)
             if subject not in EXCLUDED_SUBJECTS
         ]
-        subjects_requested = available[: args.n_subjects]
+        subjects_requested = (
+            available if args.n_subjects is None else available[: args.n_subjects]
+        )
 
     analysis_kwargs = {
         "subjects_requested": subjects_requested,

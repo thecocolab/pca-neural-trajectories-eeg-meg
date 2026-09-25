@@ -933,7 +933,13 @@ def run_nonlinear_analysis(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--subjects", nargs="*", type=int, default=list(range(1, 11)))
+    parser.add_argument(
+        "--subjects",
+        nargs="*",
+        type=int,
+        default=list(range(1, 110)),
+        help="Subject IDs (default: 1..109; unusable recordings are dropped on load).",
+    )
     parser.add_argument("--bids-root", type=Path, default=Path("PhysioNet_EEGBCI/BIDS"))
     parser.add_argument(
         "--output", type=Path, default=Path("outputs/tutorial_eegbci_nonlinear")
