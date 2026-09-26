@@ -130,10 +130,11 @@ def human_size(num_bytes: int) -> str:
 
 
 def sort_key(segments: list[str]) -> tuple:
-    """Root reports first, then priority segments, then alphabetical."""
-    head = segments[0] if segments else ""
-    rank = PRIORITY.index(head) if head in PRIORITY else len(PRIORITY)
-    return (len(segments), rank, segments)
+    """Root reports first; within a parent (e.g. one contrast), priority segments
+    such as the main sensor selection first, then alphabetical."""
+    last = segments[-1] if segments else ""
+    rank = PRIORITY.index(last) if last in PRIORITY else len(PRIORITY)
+    return (len(segments), segments[:-1], rank, segments)
 
 
 def collect(source: Path) -> dict[tuple[str, str], list[dict]]:
