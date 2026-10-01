@@ -1,7 +1,8 @@
 # PCA trajectories for EEG and MEG
 
-Code and notebooks for our tutorial paper, *A Primer on Low-Dimensional Neural
-Dynamics: PCA-Based Trajectory Analysis for EEG and MEG*.
+Code and notebooks for our tutorial paper, *From Signals to Trajectories: A Primer on
+Low-Dimensional Dynamics in Human EEG and MEG*
+([arXiv:2609.32315](https://arxiv.org/abs/2609.32315)).
 
 The idea is simple. An evoked response is a sensor pattern that changes over time.
 If you project it onto a few principal components, you can draw that change as a
@@ -9,7 +10,7 @@ path and ask questions about its shape: when do two conditions separate, how fas
 does the pattern move, does it look the same in another person. The notebooks show
 how to do this on two open datasets, and where it stops working.
 
-**Results:** <https://thecocolab.github.io/pca-neural-trajectories-eeg-meg/>
+**Interactive reports:** <https://thecocolab.github.io/pca-neural-trajectories-eeg-meg/>
 
 ## Install
 
