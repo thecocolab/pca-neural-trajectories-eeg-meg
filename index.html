@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From Signals to Trajectories: a primer on low-dimensional dynamics in EEG and MEG</title>
+<meta name="description" content="Companion site for the primer: interactive reports, tutorial notebooks and code for PCA-based trajectory analysis of human EEG and MEG.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<script>
+  // Light or dark: the saved choice, or else what the system prefers.
+  (function () {
+    let theme = null;
+    try { theme = localStorage.getItem('theme'); } catch (error) {}
+    if (theme !== 'light' && theme !== 'dark')
+      theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
+<style>
+  /* The three colours are the ones the figures use for the three conditions. */
+  :root {
+    --blue: #0072b2;
+    --orange: #d55e00;
+    --green: #009e73;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+
+    /* light */
+    --bg: #ffffff;
+    --band: #f4f6f8;
+    --card: #ffffff;
+    --ink: #17202b;
+    --soft: #5b6775;
+    --line: #dfe4ea;
+    --link: #0072b2;
+    --edge: #b8c2ce;                       /* outlines of buttons */
+    --top: rgba(255, 255, 255, .9);
+    --cover:
+      radial-gradient(60rem 28rem at 88% -10%, rgba(0, 114, 178, .10), transparent 65%),
+      radial-gradient(48rem 26rem at -5% 115%, rgba(0, 158, 115, .08), transparent 65%),
+      #ffffff;
+    --panel: #ffffff;
+    --code: #17202b;
+    --boost: none;                         /* line colours as they are */
+    --shadow: 0 6px 20px rgba(14, 23, 34, .09);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a0f15;
+    --band: #0f161f;
+    --card: #141c27;
+    --ink: #e9eef4;
+    --soft: #98a7b8;
+    --line: #232f3e;
+    --link: #6cc0f5;
+    --edge: #4a5b70;
+    --top: rgba(10, 15, 21, .88);
+    --cover:
+      radial-gradient(60rem 30rem at 88% -15%, rgba(0, 114, 178, .30), transparent 65%),
+      radial-gradient(48rem 28rem at -5% 120%, rgba(0, 158, 115, .16), transparent 65%),
+      radial-gradient(40rem 22rem at 45% 125%, rgba(213, 94, 0, .10), transparent 70%),
+      #0a0f15;
+    --panel: rgba(20, 28, 39, .78);
+    --code: #141c27;
+    --boost: brightness(1.45) saturate(1.05);   /* the same colours, readable on dark */
+    --shadow: 0 8px 26px rgba(0, 0, 0, .5);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(--sans); }
+  a { color: var(--link); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.2; margin: 0; }
+  p { margin: 0 0 1rem; }
+  .wide { max-width: 1140px; margin: 0 auto; padding-left: 1.5rem; padding-right: 1.5rem; }
+  .stripe { height: 4px; background: linear-gradient(90deg, var(--blue) 0 33.3%, var(--orange) 33.3% 66.6%, var(--green) 66.6%); }
+
+  /* bar at the top */
+  .top {
+    position: sticky; top: 0; z-index: 10; background: var(--top);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+  }
+  .top .wide { display: flex; align-items: center; gap: 1.5rem; min-height: 3.1rem; }
+  .top .name { font: 600 1.02rem var(--serif); color: var(--ink); text-decoration: none; margin-right: auto; white-space: nowrap; }
+  .top nav { display: flex; align-items: center; gap: 1.4rem; font-size: .92rem; }
+  .top nav a { color: var(--soft); text-decoration: none; white-space: nowrap; }
+  .top nav a:hover { color: var(--ink); }
+  .theme {
+    padding: .18rem .7rem; border: 1px solid var(--edge); border-radius: 6px;
+    background: transparent; color: var(--ink); font: 600 .82rem var(--sans); cursor: pointer; white-space: nowrap;
+  }
+  .theme:hover { border-color: var(--ink); }
+
+  /* cover */
+  .cover { background: var(--cover); }
+  .cover .wide { display: grid; grid-template-columns: 1fr 1.05fr; gap: 3rem; align-items: center; padding-top: 3rem; padding-bottom: 3rem; }
+  .kicker { font-size: .82rem; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--soft); margin-bottom: 1rem; }
+  .cover h1 { font-size: clamp(1.9rem, 3.5vw, 2.85rem); letter-spacing: -.012em; }
+  .cover h1 span { display: block; font-weight: 400; font-size: .62em; line-height: 1.3; margin-top: .7rem; opacity: .85; }
+  .authors { margin: 1.5rem 0 1.7rem; color: var(--soft); font-size: 1rem; }
+  .buttons { display: flex; flex-wrap: wrap; gap: .6rem; }
+  .buttons a {
+    padding: .55rem 1.25rem; border: 1px solid var(--edge); border-radius: 6px;
+    color: var(--ink); font-size: .95rem; font-weight: 600; text-decoration: none;
+  }
+  .buttons a:hover { border-color: var(--ink); }
+  .buttons a.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  .buttons a.primary:hover { opacity: .88; }
+
+  /* shared by every plot on the page */
+  svg path { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  svg path:not(.ref), svg circle, .key li::before { filter: var(--boost); }
+  svg path.dashed { stroke-dasharray: 5 4; }
+  svg path.ref { stroke: var(--line); stroke-width: 1; }
+  svg circle { fill: var(--c); }
+  svg text { fill: var(--soft); font: 12px var(--sans); }
+  figure { margin: 0; }
+  .key { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .1rem 1rem; font-size: .8rem; color: var(--soft); }
+  .key li::before {
+    content: ""; display: inline-block; width: 1.2rem; margin-right: .4rem; vertical-align: middle;
+    border-top: 3px solid var(--c);
+  }
+  .key li.dashed::before { border-top-style: dashed; }
+
+  /* the trajectory you can play */
+  .player { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem 1.1rem; box-shadow: var(--shadow); }
+  .player svg { display: block; width: 100%; height: auto; }
+  .player path.ghost { opacity: .22; stroke-width: 1.5; }
+  .player path.live { stroke-width: 3; }
+  .controls { display: flex; align-items: center; gap: .9rem; margin: .4rem 0 .6rem; }
+  .controls button {
+    min-width: 4.6rem; padding: .3rem .8rem; border: 1px solid var(--edge); border-radius: 6px;
+    background: transparent; color: var(--ink); font: 600 .9rem var(--sans); cursor: pointer;
+  }
+  .controls button:hover { border-color: var(--ink); }
+  .controls input { flex: 1; accent-color: var(--ink); }
+  .controls output { min-width: 13.5rem; font-size: .9rem; font-variant-numeric: tabular-nums; }
+  .player .key { font-size: .9rem; margin-bottom: .55rem; color: var(--ink); }
+  .player figcaption { color: var(--soft); font-size: .84rem; line-height: 1.45; }
+
+  /* sections: heading on the left, content on the right */
+  section { padding: 4rem 0; scroll-margin-top: 3rem; }
+  section.band { background: var(--band); }
+  .split { display: grid; grid-template-columns: 15rem 1fr; gap: 3rem; }
+  .split > header { align-self: start; position: sticky; top: 4.5rem; }
+  h2 { font-size: 1.75rem; }
+  h2::after { content: ""; display: block; width: 2.5rem; height: 3px; margin-top: .7rem; background: var(--orange); }
+  .split > header p { color: var(--soft); font-size: .93rem; margin: .9rem 0 0; }
+
+  .prose { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; }
+  .prose h3 { font-size: 1.2rem; margin-bottom: .5rem; }
+  .prose p { font-size: 1rem; }
+
+  /* results shown in the paper */
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  .result {
+    display: block; padding: 1rem 1.1rem 1.1rem; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; color: inherit; text-decoration: none;
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+  }
+  .result:hover { border-color: var(--link); box-shadow: var(--shadow); transform: translateY(-2px); }
+  .result .plot { display: block; width: 100%; height: auto; background: var(--band); border-radius: 6px; margin-bottom: .5rem; }
+  .result .shows { color: var(--soft); font-size: .78rem; margin: .25rem 0 .9rem; }
+  .figure-label { display: inline-block; font-size: .76rem; font-weight: 600; letter-spacing: .03em; color: #fff; background: var(--blue); border-radius: 4px; padding: .05rem .5rem; }
+  .result h3 { font-size: 1.2rem; margin: .5rem 0 .3rem; }
+  .result p { font-size: .93rem; color: var(--soft); margin: 0 0 .6rem; }
+  .result .open { font-size: .93rem; font-weight: 600; color: var(--link); }
+  .result .open::after, .links a::after { content: " \2192"; display: inline-block; margin-left: .25rem; }
+
+  /* every report, by dataset */
+  .dataset { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1.4rem 1.5rem .4rem; scroll-margin-top: 4rem; }
+  .dataset + .dataset { margin-top: 1.5rem; }
+  .dataset h3 { font-size: 1.3rem; }
+  .about { color: var(--soft); margin: .3rem 0 1rem; font-size: .95rem; }
+  .picker { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .9rem; }
+  .picker .ask { font-weight: 600; margin-right: .4rem; }
+  .picker button {
+    padding: .25rem .8rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  .picker button:hover { border-color: var(--blue); }
+  .picker button[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .picker-note { color: var(--soft); font-size: .84rem; margin: .5rem 0 1rem; }
+  .rows { border-top: 1px solid var(--line); }
+  .row { display: grid; grid-template-columns: 13.5rem 1fr; gap: .3rem 1.5rem; padding: .95rem 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row h4 { margin: 0; font: 600 1rem var(--sans); }
+  .row p { margin: 0 0 .4rem; font-size: .93rem; color: var(--soft); }
+  .links { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .2rem 1.4rem; font-size: .95rem; }
+  .links li[hidden] { display: none; }
+  .links a { text-decoration: none; font-weight: 600; }
+  .links a:hover { text-decoration: underline; }
+
+  /* the code */
+  .parts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-bottom: 1.5rem; }
+  .parts div { background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: 8px; padding: 1.1rem 1.2rem; }
+  .parts h3 { font-size: 1.12rem; margin-bottom: .35rem; }
+  .parts p { font-size: .93rem; color: var(--soft); margin: 0; }
+  .table { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .3rem 1.2rem; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+  th, td { text-align: left; padding: .65rem .9rem .65rem 0; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--soft); font-weight: 600; border-top: 0; }
+  td:first-child { width: 1.8rem; color: var(--soft); font-family: var(--serif); }
+  td:nth-child(2) { font-weight: 600; }
+  td:nth-child(2) a { text-decoration: none; }
+  td:nth-child(2) a:hover { text-decoration: underline; }
+  td:last-child { white-space: nowrap; color: var(--soft); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .84em; }
+
+  .cite { position: relative; }
+  pre { background: var(--code); color: #dbe4ee; border: 1px solid var(--line); border-radius: 10px; padding: 1.2rem 1.3rem; overflow-x: auto; line-height: 1.55; margin: 0; }
+  .copy {
+    position: absolute; top: .7rem; right: .7rem; padding: .2rem .7rem; border: 1px solid #5c6e83;
+    border-radius: 6px; background: transparent; color: #fff; font: 600 .8rem var(--sans); cursor: pointer;
+  }
+  .copy:hover { border-color: #fff; }
+
+  footer { background: var(--band); color: var(--soft); font-size: .88rem; }
+  footer .wide { padding-top: 1.75rem; padding-bottom: 2.25rem; }
+  footer p { margin: 0 0 .35rem; }
+
+  @media (max-width: 980px) {
+    .cover .wide { grid-template-columns: 1fr; gap: 2rem; padding-top: 2.25rem; }
+    .split { grid-template-columns: 1fr; gap: 1.5rem; }
+    .split > header { position: static; }
+    section { padding: 3rem 0; }
+  }
+  @media (max-width: 700px) {
+    .results, .parts, .prose { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr; }
+    .top .name { display: none; }
+    .top nav { width: 100%; justify-content: space-between; gap: .6rem; font-size: .85rem; }
+    .controls { flex-wrap: wrap; }
+    .controls output { min-width: 100%; order: 3; }
+    td:last-child { white-space: normal; }
+    .dataset { padding: 1.1rem 1rem .2rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="wide">
+    <a class="name" href="#top">From Signals to Trajectories</a>
+    <nav>
+      <a class="extra" href="#about">About</a>
+      <a href="#paper">Paper results</a>
+      <a href="#reports">All reports</a>
+      <a class="extra" href="#code">Code</a>
+      <a class="extra" href="#cite">Cite</a>
+      <button type="button" class="theme" aria-label="Switch between light and dark background"></button>
+    </nav>
+  </div>
+</div>
+
+<header class="cover" id="top">
+  <div class="wide">
+    <div>
+      <p class="kicker">Companion site</p>
+      <h1>From Signals to Trajectories
+        <span>A primer on low&#8209;dimensional dynamics in human EEG and MEG</span></h1>
+      <p class="authors">
+        Vanessa Hadid, Hamza Abdelhedi, Annalisa Pascarella, Sara A. Solla, Paul Cisek, Karim Jerbi
+      </p>
+      <nav class="buttons">
+        <a class="primary" href="https://arxiv.org/abs/2609.32315">Preprint</a>
+        <a href="view.html">Reports</a>
+        <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">Code</a>
+      </nav>
+    </div>
+    <figure class="player">
+    <svg viewBox="0 0 640 440" role="img" aria-label="Trajectories of the MEG response on the first two principal components, one per image type">
+      <path class="ref" d="M20 20 V420 H620"/>
+      <text x="620" y="436" text-anchor="end">PC 1</text>
+      <text x="14" y="20" text-anchor="end" transform="rotate(-90 14 20)">PC 2</text>
+      <path class="ghost" style="--c:#0072B2" d="M188.2 110.2 L191.3 112.0 L194.7 111.7 L198.1 111.3 L200.9 112.0 L202.1 113.6 L201.5 114.7 L200.1 113.8 L199.6 111.3 L201.1 108.8 L203.8 108.2 L206.2 109.9 L206.7 112.8 L205.6 115.1 L204.0 115.7 L203.1 115.1 L203.4 114.1 L204.5 113.6 L206.3 113.7 L209.3 114.4 L214.2 115.6 L220.9 117.7 L228.5 120.8 L235.2 124.1 L239.6 126.7 L241.6 128.4 L241.9 129.5 L241.4 131.1 L240.4 133.3 L238.7 135.3 L236.4 136.2 L233.6 135.5 L230.6 134.4 L227.7 133.9 L225.3 134.8 L223.1 136.5 L220.6 138.3 L217.1 140.1 L212.8 142.2 L208.1 144.7 L204.5 147.3 L203.1 149.1 L204.0 149.7 L206.1 149.9 L207.9 150.3 L208.5 151.2 L208.1 151.7 L207.5 151.3 L207.1 149.7 L206.5 147.8 L205.5 146.1 L204.7 144.4 L205.5 142.7 L209.1 141.0 L214.8 140.1 L220.3 140.5 L223.3 141.2 L222.9 141.0 L220.4 140.0 L218.2 139.6 L217.2 142.1 L216.7 147.6 L215.1 153.1 L211.3 153.4 L205.7 143.9 L199.6 124.0 L194.4 96.8 L190.1 68.6 L185.9 46.7 L180.9 36.2 L176.1 38.5 L174.5 49.6 L181.1 62.3 L200.2 71.1 L233.1 76.2 L275.6 84.0 L320.4 102.0 L359.5 131.8 L388.9 167.3 L409.1 198.5 L423.2 218.7 L434.1 229.3 L442.2 237.3 L447.1 248.0 L449.1 261.9 L450.2 275.0 L452.2 285.1 L454.9 294.4 L455.8 307.5 L451.9 326.9 L442.2 350.0 L427.9 371.2 L410.8 386.5 L391.5 395.8 L369.5 401.9 L344.8 406.9 L319.7 410.0 L297.8 408.7 L281.3 401.4 L270.0 389.0 L261.5 373.9 L253.7 358.0 L246.7 342.0 L241.9 325.5 L239.9 308.8 L239.1 293.3 L237.4 280.7 L233.6 271.2 L229.6 263.4 L227.8 256.0 L229.4 248.9 L233.0 243.5 L236.0 241.8 L236.7 243.6 L235.8 246.8 L235.7 248.0 L238.2 245.5 L243.4 240.4 L250.3 235.4 L258.0 233.2 L267.0 234.9 L277.6 239.6 L289.8 245.8 L302.7 252.5 L315.4 259.0 L327.9 265.0 L341.1 269.8 L355.8 273.2 L371.5 275.8 L386.6 278.7 L399.6 282.1 L410.2 285.3 L419.2 287.0 L427.7 285.8 L436.3 281.7 L444.6 275.8 L451.9 269.8 L458.0 264.8 L463.1 261.6 L467.7 260.0 L472.0 259.2 L475.7 258.2 L478.0 255.7 L478.4 251.3 L477.0 245.8 L474.3 240.7 L471.1 237.4 L468.2 236.0 L466.0 235.8 L464.9 235.6 L464.9 235.0 L465.7 234.0 L466.8 232.8 L467.1 231.1 L465.8 228.7 L462.9 226.0 L459.7 223.9 L458.1 222.9 L459.1 222.0 L461.7 219.3 L463.8 213.3 L463.6 204.7 L461.0 195.7 L458.1 189.0 L456.9 185.7 L458.0 184.7 L460.4 184.2 L462.6 183.1 L463.8 182.1 L464.6 182.3 L465.8 184.3 L467.6 187.2 L469.0 189.5 L469.3 190.1 L468.1 189.3 L466.1 187.9 L464.2 186.4 L463.3 185.1 L463.2 183.6 L463.7 182.0 L464.0 180.3 L463.7 178.6 L462.3 176.3 L459.2 172.9 L454.4 168.0 L448.4 162.0 L442.5 156.4 L438.3 152.4 L436.9 150.7 L438.2 151.2 L440.9 153.1 L443.6 155.8 L445.2 159.4 L446.0 164.1 L447.0 169.9 L448.9 175.9 L451.5 180.3 L454.0 182.3 L455.5 182.2 L455.8 181.7 L455.0 182.1 L453.3 183.4 L450.8 183.9 L447.8 181.4 L445.4 175.3 L444.5 167.0 L445.5 159.0 L447.6 153.1 L448.9 149.7 L448.2 147.4 L445.2 144.9 L440.6 141.1 L435.4 136.3 L429.8 131.7 L423.8 128.5 L417.9 127.8 L413.2 130.0 L410.5 134.5 L410.1 140.2 L411.3 145.5 L412.7 149.4 L413.5 151.9 L413.6 153.8 L413.1 155.8 L411.9 158.2 L410.4 160.3 L409.0 161.1 L408.0 160.4 L407.4 158.5 L406.6 156.4 L404.7 154.3 L401.2 151.8 L396.9 148.1 L393.0 143.1 L390.4 137.4 L388.6 132.0 L386.7 127.5 L384.0 123.4 L381.1 118.6 L379.0 113.0 L378.7 107.9 L380.1 105.0 L382.1 105.6 L383.6 109.1 L383.9 114.2 L383.5 119.8 L382.9 125.9 L382.8 133.4 L383.0 142.2 L382.8 150.9 L381.6 157.2"/>
+      <path class="ghost" style="--c:#D55E00" d="M193.1 94.8 L189.7 99.2 L189.0 104.0 L189.7 108.4 L189.8 112.0 L188.2 114.7 L186.0 116.8 L185.5 118.7 L188.0 120.7 L192.6 122.9 L197.1 125.0 L199.9 126.1 L201.1 126.0 L202.0 125.0 L203.5 124.3 L205.9 124.4 L208.7 125.2 L211.9 125.8 L215.9 125.7 L221.1 125.4 L226.6 125.9 L231.0 127.4 L232.8 128.8 L231.7 128.4 L228.5 125.5 L224.9 121.1 L222.4 117.7 L221.8 117.4 L223.2 120.2 L226.3 124.4 L229.9 128.4 L233.0 131.5 L234.4 134.4 L233.6 137.6 L230.9 141.2 L227.1 144.3 L223.5 146.6 L220.8 148.1 L219.3 149.4 L218.6 150.0 L218.0 149.0 L217.0 145.7 L215.7 140.8 L214.8 136.3 L214.7 134.0 L215.6 134.0 L217.2 134.9 L219.0 135.1 L220.2 133.9 L220.3 132.0 L218.6 130.2 L214.7 128.5 L209.0 126.9 L202.9 125.8 L197.9 126.0 L195.2 127.6 L194.2 129.4 L193.6 129.8 L192.3 129.0 L190.7 129.6 L189.9 134.8 L190.6 144.9 L192.2 155.8 L192.9 160.6 L191.6 154.0 L188.9 135.5 L186.8 109.8 L187.0 84.0 L189.8 64.4 L193.3 53.9 L196.0 51.2 L199.1 53.0 L206.9 55.5 L224.3 57.4 L253.3 60.9 L290.5 70.5 L328.5 89.2 L360.5 115.9 L383.4 145.0 L399.4 170.1 L412.6 188.5 L425.2 203.1 L436.3 219.0 L443.8 239.0 L447.4 261.6 L449.7 282.9 L453.4 300.4 L458.7 315.1 L462.4 329.8 L460.1 345.4 L449.8 360.2 L432.6 371.3 L411.8 377.6 L389.2 380.3 L365.3 381.6 L339.6 381.8 L313.1 379.1 L288.6 371.7 L268.7 359.6 L254.1 344.9 L243.3 330.3 L234.0 316.5 L225.2 302.4 L217.6 287.0 L212.6 270.6 L210.6 255.3 L210.4 243.5 L210.1 236.0 L208.7 232.0 L207.1 229.5 L206.9 227.2 L209.7 224.6 L215.2 222.1 L222.3 220.4 L229.0 219.7 L234.3 219.9 L238.2 220.7 L241.3 221.8 L244.6 222.5 L248.8 222.5 L254.2 222.0 L261.2 221.4 L269.9 221.5 L280.2 222.5 L291.9 224.2 L304.5 225.8 L317.3 227.3 L329.7 229.2 L341.8 232.3 L354.2 237.1 L367.8 243.3 L382.5 249.5 L397.3 254.5 L410.4 257.9 L420.8 259.8 L428.7 261.0 L435.4 261.9 L441.9 262.5 L448.3 262.6 L453.6 261.6 L456.5 259.2 L456.9 255.3 L455.8 250.1 L454.7 244.0 L454.6 237.5 L455.3 231.2 L456.1 225.3 L456.2 220.3 L455.2 216.4 L453.5 213.8 L451.7 212.7 L450.1 212.7 L448.9 213.1 L448.2 213.2 L448.0 212.7 L448.0 211.9 L447.8 211.3 L447.1 211.0 L445.8 210.5 L444.4 209.3 L443.7 207.3 L443.6 204.8 L443.6 202.7 L442.9 201.1 L440.9 200.1 L438.6 199.1 L437.1 197.9 L437.5 196.2 L439.5 194.0 L441.5 191.5 L442.2 188.9 L441.4 186.6 L440.2 184.7 L439.8 183.0 L440.4 181.1 L441.1 178.5 L441.2 175.4 L440.4 172.4 L439.5 170.1 L439.0 168.3 L438.5 166.4 L436.8 163.8 L433.5 160.4 L429.8 157.3 L427.6 155.5 L428.2 155.8 L430.7 158.1 L432.8 161.8 L432.9 166.3 L431.2 170.6 L429.8 173.4 L430.3 173.8 L432.4 172.0 L434.0 169.1 L433.2 166.9 L430.4 166.5 L427.9 167.0 L427.8 166.8 L430.3 164.5 L433.4 160.1 L434.8 155.4 L433.7 152.3 L431.3 151.7 L429.1 153.3 L427.6 155.7 L425.7 157.7 L422.7 158.6 L418.6 158.5 L414.4 157.7 L411.2 156.9 L409.0 156.1 L407.4 155.1 L406.0 153.4 L405.4 150.5 L405.9 147.1 L407.4 144.1 L408.9 142.7 L409.7 143.1 L410.0 144.3 L410.7 144.8 L412.2 143.9 L414.1 142.2 L414.8 141.1 L413.4 141.5 L410.4 143.1 L407.2 144.0 L404.8 142.9 L403.4 140.0 L402.1 137.0 L400.3 135.8 L398.0 136.7 L395.6 138.1 L393.7 138.1 L391.9 135.9 L390.0 132.4 L387.9 129.4 L385.8 127.9 L384.1 127.7 L382.9 127.9 L382.3 128.2 L382.6 129.3 L384.4 132.0 L387.4 135.8 L391.0 139.4 L393.9 141.2 L395.1 140.8 L394.6 139.1 L392.8 137.3 L390.1 136.3 L386.5 135.7 L381.8 135.2"/>
+      <path class="ghost" style="--c:#009E73" d="M194.4 99.4 L193.5 99.7 L192.9 99.1 L193.7 98.4 L195.4 98.1 L197.0 98.5 L197.5 100.0 L197.0 102.8 L196.0 106.5 L195.3 110.5 L195.4 113.7 L196.6 115.6 L199.3 116.5 L203.4 117.0 L208.2 117.5 L212.5 118.2 L215.4 119.2 L217.0 121.0 L218.0 123.8 L219.2 127.6 L220.0 131.4 L219.6 134.4 L217.7 136.3 L215.5 137.6 L214.8 139.1 L217.1 141.1 L221.5 143.0 L225.6 143.8 L226.5 143.2 L223.7 141.2 L218.9 138.5 L214.7 135.9 L212.9 134.0 L212.9 133.1 L213.4 133.2 L213.6 134.2 L214.7 135.9 L218.0 137.7 L223.6 139.2 L229.7 140.1 L233.6 140.2 L234.2 139.9 L232.8 139.9 L231.2 140.8 L230.5 142.8 L229.5 145.3 L226.5 146.8 L220.8 146.8 L213.6 145.8 L206.9 145.3 L202.0 146.1 L198.8 147.6 L197.1 148.2 L197.4 146.9 L200.0 144.3 L204.5 141.7 L209.0 140.0 L211.5 138.5 L211.5 136.2 L210.8 133.5 L211.3 132.4 L213.4 134.6 L214.7 139.3 L212.8 141.5 L206.9 134.9 L199.1 116.3 L192.7 88.5 L189.4 60.0 L188.1 40.9 L187.0 36.8 L185.7 45.8 L187.1 59.5 L195.5 69.4 L213.8 72.1 L241.5 71.6 L274.6 75.4 L308.0 88.4 L338.2 109.3 L364.2 131.5 L386.6 148.8 L405.7 159.2 L421.0 165.4 L431.1 170.5 L435.0 175.4 L434.0 178.8 L430.5 180.1 L427.2 181.3 L424.9 185.7 L422.3 195.0 L417.1 207.1 L407.1 218.2 L392.2 225.6 L373.3 230.1 L351.6 234.3 L328.0 240.3 L303.6 247.3 L279.2 252.8 L256.2 254.3 L236.1 251.0 L219.4 243.9 L206.4 234.5 L196.6 224.2 L189.3 213.3 L183.9 201.3 L179.7 188.0 L176.0 173.5 L172.6 159.5 L169.4 148.2 L166.5 141.6 L164.0 139.7 L162.2 140.2 L161.6 140.3 L163.1 138.4 L167.5 135.5 L174.9 133.9 L184.3 134.9 L194.3 137.7 L204.1 139.8 L213.5 139.1 L223.1 135.7 L233.3 131.0 L244.5 126.6 L256.5 122.4 L269.0 117.8 L281.3 112.4 L292.7 106.9 L302.6 102.9 L311.0 101.3 L318.8 102.0 L327.2 103.9 L336.2 106.3 L345.0 109.3 L352.2 113.3 L357.4 118.2 L361.6 123.1 L367.1 126.6 L375.4 128.1 L386.1 128.2 L397.7 127.8 L408.1 127.4 L416.7 126.8 L423.5 124.6 L429.2 120.1 L433.8 113.3 L437.0 105.5 L438.6 98.5 L439.0 93.5 L439.1 90.5 L439.5 88.5 L440.1 85.9 L440.6 82.1 L440.9 77.0 L441.4 71.2 L442.5 64.9 L443.7 58.3 L444.1 51.8 L442.6 46.5 L439.3 44.3 L435.4 45.8 L432.1 50.3 L430.2 55.5 L429.1 59.4 L428.0 61.8 L426.3 63.7 L424.0 66.5 L421.3 70.0 L418.3 72.6 L414.7 72.8 L410.4 70.4 L405.7 67.0 L400.9 64.1 L396.1 62.2 L391.0 60.2 L384.9 56.9 L378.2 51.9 L372.3 45.9 L368.7 40.0 L368.2 35.3 L370.1 32.0 L373.2 30.2 L376.1 30.0 L378.6 31.2 L380.8 33.7 L383.2 37.2 L385.5 41.3 L386.9 45.3 L386.9 48.8 L385.5 51.6 L382.9 54.4 L379.8 58.3 L376.6 64.4 L373.5 72.3 L370.5 80.4 L367.8 86.5 L365.2 89.5 L362.5 90.4 L359.3 91.0 L355.0 92.3 L349.6 93.6 L343.6 92.8 L338.5 88.8 L335.9 82.2 L336.6 75.5 L340.1 70.7 L344.4 68.1 L347.6 66.8 L349.1 66.0 L349.9 65.9 L351.6 67.4 L355.3 70.8 L360.5 75.0 L365.4 78.4 L368.1 80.3 L368.0 81.9 L365.8 84.6 L362.9 88.7 L360.7 93.0 L359.6 95.9 L359.7 96.7 L360.1 96.2 L360.3 95.9 L359.8 96.3 L358.8 96.6 L357.2 95.8 L354.8 93.3 L350.8 89.7 L344.8 86.2 L337.4 83.1 L330.5 80.6 L326.2 78.2 L326.0 75.8 L329.7 73.4 L335.7 71.2 L341.8 69.8 L346.4 70.2 L349.1 73.3 L350.5 79.2 L351.1 86.2 L351.8 91.5 L352.6 93.3 L353.3 91.8 L353.2 89.7 L351.7 89.8 L348.4 92.8 L343.4 96.9 L337.6 99.1 L331.7 97.7 L326.6 93.6 L322.4 89.2 L318.6 86.6 L314.9 86.2"/>
+      <path class="live" style="--c:#0072B2" d="M188.2 110.2 L191.3 112.0 L194.7 111.7 L198.1 111.3 L200.9 112.0 L202.1 113.6 L201.5 114.7 L200.1 113.8 L199.6 111.3 L201.1 108.8 L203.8 108.2 L206.2 109.9 L206.7 112.8 L205.6 115.1 L204.0 115.7 L203.1 115.1 L203.4 114.1 L204.5 113.6 L206.3 113.7 L209.3 114.4 L214.2 115.6 L220.9 117.7 L228.5 120.8 L235.2 124.1 L239.6 126.7 L241.6 128.4 L241.9 129.5 L241.4 131.1 L240.4 133.3 L238.7 135.3 L236.4 136.2 L233.6 135.5 L230.6 134.4 L227.7 133.9 L225.3 134.8 L223.1 136.5 L220.6 138.3 L217.1 140.1 L212.8 142.2 L208.1 144.7 L204.5 147.3 L203.1 149.1 L204.0 149.7 L206.1 149.9 L207.9 150.3 L208.5 151.2 L208.1 151.7 L207.5 151.3 L207.1 149.7 L206.5 147.8 L205.5 146.1 L204.7 144.4 L205.5 142.7 L209.1 141.0 L214.8 140.1 L220.3 140.5 L223.3 141.2 L222.9 141.0 L220.4 140.0 L218.2 139.6 L217.2 142.1 L216.7 147.6 L215.1 153.1 L211.3 153.4 L205.7 143.9 L199.6 124.0 L194.4 96.8 L190.1 68.6 L185.9 46.7 L180.9 36.2 L176.1 38.5 L174.5 49.6 L181.1 62.3 L200.2 71.1 L233.1 76.2 L275.6 84.0 L320.4 102.0 L359.5 131.8 L388.9 167.3 L409.1 198.5 L423.2 218.7 L434.1 229.3 L442.2 237.3 L447.1 248.0 L449.1 261.9 L450.2 275.0 L452.2 285.1 L454.9 294.4 L455.8 307.5 L451.9 326.9 L442.2 350.0 L427.9 371.2 L410.8 386.5 L391.5 395.8 L369.5 401.9 L344.8 406.9 L319.7 410.0 L297.8 408.7 L281.3 401.4 L270.0 389.0 L261.5 373.9 L253.7 358.0 L246.7 342.0 L241.9 325.5 L239.9 308.8 L239.1 293.3 L237.4 280.7 L233.6 271.2 L229.6 263.4 L227.8 256.0 L229.4 248.9 L233.0 243.5 L236.0 241.8 L236.7 243.6 L235.8 246.8 L235.7 248.0 L238.2 245.5 L243.4 240.4 L250.3 235.4 L258.0 233.2 L267.0 234.9 L277.6 239.6 L289.8 245.8 L302.7 252.5 L315.4 259.0 L327.9 265.0 L341.1 269.8 L355.8 273.2 L371.5 275.8 L386.6 278.7 L399.6 282.1 L410.2 285.3 L419.2 287.0 L427.7 285.8 L436.3 281.7 L444.6 275.8 L451.9 269.8 L458.0 264.8 L463.1 261.6 L467.7 260.0 L472.0 259.2 L475.7 258.2 L478.0 255.7 L478.4 251.3 L477.0 245.8 L474.3 240.7 L471.1 237.4 L468.2 236.0 L466.0 235.8 L464.9 235.6 L464.9 235.0 L465.7 234.0 L466.8 232.8 L467.1 231.1 L465.8 228.7 L462.9 226.0 L459.7 223.9 L458.1 222.9 L459.1 222.0 L461.7 219.3 L463.8 213.3 L463.6 204.7 L461.0 195.7 L458.1 189.0 L456.9 185.7 L458.0 184.7 L460.4 184.2 L462.6 183.1 L463.8 182.1 L464.6 182.3 L465.8 184.3 L467.6 187.2 L469.0 189.5 L469.3 190.1 L468.1 189.3 L466.1 187.9 L464.2 186.4 L463.3 185.1 L463.2 183.6 L463.7 182.0 L464.0 180.3 L463.7 178.6 L462.3 176.3 L459.2 172.9 L454.4 168.0 L448.4 162.0 L442.5 156.4 L438.3 152.4 L436.9 150.7 L438.2 151.2 L440.9 153.1 L443.6 155.8 L445.2 159.4 L446.0 164.1 L447.0 169.9 L448.9 175.9 L451.5 180.3 L454.0 182.3 L455.5 182.2 L455.8 181.7 L455.0 182.1 L453.3 183.4 L450.8 183.9 L447.8 181.4 L445.4 175.3 L444.5 167.0 L445.5 159.0 L447.6 153.1 L448.9 149.7 L448.2 147.4 L445.2 144.9 L440.6 141.1 L435.4 136.3 L429.8 131.7 L423.8 128.5 L417.9 127.8 L413.2 130.0 L410.5 134.5 L410.1 140.2 L411.3 145.5 L412.7 149.4 L413.5 151.9 L413.6 153.8 L413.1 155.8 L411.9 158.2 L410.4 160.3 L409.0 161.1 L408.0 160.4 L407.4 158.5 L406.6 156.4 L404.7 154.3 L401.2 151.8 L396.9 148.1 L393.0 143.1 L390.4 137.4 L388.6 132.0 L386.7 127.5 L384.0 123.4 L381.1 118.6 L379.0 113.0 L378.7 107.9 L380.1 105.0 L382.1 105.6 L383.6 109.1 L383.9 114.2 L383.5 119.8 L382.9 125.9 L382.8 133.4 L383.0 142.2 L382.8 150.9 L381.6 157.2"/>
+      <path class="live" style="--c:#D55E00" d="M193.1 94.8 L189.7 99.2 L189.0 104.0 L189.7 108.4 L189.8 112.0 L188.2 114.7 L186.0 116.8 L185.5 118.7 L188.0 120.7 L192.6 122.9 L197.1 125.0 L199.9 126.1 L201.1 126.0 L202.0 125.0 L203.5 124.3 L205.9 124.4 L208.7 125.2 L211.9 125.8 L215.9 125.7 L221.1 125.4 L226.6 125.9 L231.0 127.4 L232.8 128.8 L231.7 128.4 L228.5 125.5 L224.9 121.1 L222.4 117.7 L221.8 117.4 L223.2 120.2 L226.3 124.4 L229.9 128.4 L233.0 131.5 L234.4 134.4 L233.6 137.6 L230.9 141.2 L227.1 144.3 L223.5 146.6 L220.8 148.1 L219.3 149.4 L218.6 150.0 L218.0 149.0 L217.0 145.7 L215.7 140.8 L214.8 136.3 L214.7 134.0 L215.6 134.0 L217.2 134.9 L219.0 135.1 L220.2 133.9 L220.3 132.0 L218.6 130.2 L214.7 128.5 L209.0 126.9 L202.9 125.8 L197.9 126.0 L195.2 127.6 L194.2 129.4 L193.6 129.8 L192.3 129.0 L190.7 129.6 L189.9 134.8 L190.6 144.9 L192.2 155.8 L192.9 160.6 L191.6 154.0 L188.9 135.5 L186.8 109.8 L187.0 84.0 L189.8 64.4 L193.3 53.9 L196.0 51.2 L199.1 53.0 L206.9 55.5 L224.3 57.4 L253.3 60.9 L290.5 70.5 L328.5 89.2 L360.5 115.9 L383.4 145.0 L399.4 170.1 L412.6 188.5 L425.2 203.1 L436.3 219.0 L443.8 239.0 L447.4 261.6 L449.7 282.9 L453.4 300.4 L458.7 315.1 L462.4 329.8 L460.1 345.4 L449.8 360.2 L432.6 371.3 L411.8 377.6 L389.2 380.3 L365.3 381.6 L339.6 381.8 L313.1 379.1 L288.6 371.7 L268.7 359.6 L254.1 344.9 L243.3 330.3 L234.0 316.5 L225.2 302.4 L217.6 287.0 L212.6 270.6 L210.6 255.3 L210.4 243.5 L210.1 236.0 L208.7 232.0 L207.1 229.5 L206.9 227.2 L209.7 224.6 L215.2 222.1 L222.3 220.4 L229.0 219.7 L234.3 219.9 L238.2 220.7 L241.3 221.8 L244.6 222.5 L248.8 222.5 L254.2 222.0 L261.2 221.4 L269.9 221.5 L280.2 222.5 L291.9 224.2 L304.5 225.8 L317.3 227.3 L329.7 229.2 L341.8 232.3 L354.2 237.1 L367.8 243.3 L382.5 249.5 L397.3 254.5 L410.4 257.9 L420.8 259.8 L428.7 261.0 L435.4 261.9 L441.9 262.5 L448.3 262.6 L453.6 261.6 L456.5 259.2 L456.9 255.3 L455.8 250.1 L454.7 244.0 L454.6 237.5 L455.3 231.2 L456.1 225.3 L456.2 220.3 L455.2 216.4 L453.5 213.8 L451.7 212.7 L450.1 212.7 L448.9 213.1 L448.2 213.2 L448.0 212.7 L448.0 211.9 L447.8 211.3 L447.1 211.0 L445.8 210.5 L444.4 209.3 L443.7 207.3 L443.6 204.8 L443.6 202.7 L442.9 201.1 L440.9 200.1 L438.6 199.1 L437.1 197.9 L437.5 196.2 L439.5 194.0 L441.5 191.5 L442.2 188.9 L441.4 186.6 L440.2 184.7 L439.8 183.0 L440.4 181.1 L441.1 178.5 L441.2 175.4 L440.4 172.4 L439.5 170.1 L439.0 168.3 L438.5 166.4 L436.8 163.8 L433.5 160.4 L429.8 157.3 L427.6 155.5 L428.2 155.8 L430.7 158.1 L432.8 161.8 L432.9 166.3 L431.2 170.6 L429.8 173.4 L430.3 173.8 L432.4 172.0 L434.0 169.1 L433.2 166.9 L430.4 166.5 L427.9 167.0 L427.8 166.8 L430.3 164.5 L433.4 160.1 L434.8 155.4 L433.7 152.3 L431.3 151.7 L429.1 153.3 L427.6 155.7 L425.7 157.7 L422.7 158.6 L418.6 158.5 L414.4 157.7 L411.2 156.9 L409.0 156.1 L407.4 155.1 L406.0 153.4 L405.4 150.5 L405.9 147.1 L407.4 144.1 L408.9 142.7 L409.7 143.1 L410.0 144.3 L410.7 144.8 L412.2 143.9 L414.1 142.2 L414.8 141.1 L413.4 141.5 L410.4 143.1 L407.2 144.0 L404.8 142.9 L403.4 140.0 L402.1 137.0 L400.3 135.8 L398.0 136.7 L395.6 138.1 L393.7 138.1 L391.9 135.9 L390.0 132.4 L387.9 129.4 L385.8 127.9 L384.1 127.7 L382.9 127.9 L382.3 128.2 L382.6 129.3 L384.4 132.0 L387.4 135.8 L391.0 139.4 L393.9 141.2 L395.1 140.8 L394.6 139.1 L392.8 137.3 L390.1 136.3 L386.5 135.7 L381.8 135.2"/>
+      <path class="live" style="--c:#009E73" d="M194.4 99.4 L193.5 99.7 L192.9 99.1 L193.7 98.4 L195.4 98.1 L197.0 98.5 L197.5 100.0 L197.0 102.8 L196.0 106.5 L195.3 110.5 L195.4 113.7 L196.6 115.6 L199.3 116.5 L203.4 117.0 L208.2 117.5 L212.5 118.2 L215.4 119.2 L217.0 121.0 L218.0 123.8 L219.2 127.6 L220.0 131.4 L219.6 134.4 L217.7 136.3 L215.5 137.6 L214.8 139.1 L217.1 141.1 L221.5 143.0 L225.6 143.8 L226.5 143.2 L223.7 141.2 L218.9 138.5 L214.7 135.9 L212.9 134.0 L212.9 133.1 L213.4 133.2 L213.6 134.2 L214.7 135.9 L218.0 137.7 L223.6 139.2 L229.7 140.1 L233.6 140.2 L234.2 139.9 L232.8 139.9 L231.2 140.8 L230.5 142.8 L229.5 145.3 L226.5 146.8 L220.8 146.8 L213.6 145.8 L206.9 145.3 L202.0 146.1 L198.8 147.6 L197.1 148.2 L197.4 146.9 L200.0 144.3 L204.5 141.7 L209.0 140.0 L211.5 138.5 L211.5 136.2 L210.8 133.5 L211.3 132.4 L213.4 134.6 L214.7 139.3 L212.8 141.5 L206.9 134.9 L199.1 116.3 L192.7 88.5 L189.4 60.0 L188.1 40.9 L187.0 36.8 L185.7 45.8 L187.1 59.5 L195.5 69.4 L213.8 72.1 L241.5 71.6 L274.6 75.4 L308.0 88.4 L338.2 109.3 L364.2 131.5 L386.6 148.8 L405.7 159.2 L421.0 165.4 L431.1 170.5 L435.0 175.4 L434.0 178.8 L430.5 180.1 L427.2 181.3 L424.9 185.7 L422.3 195.0 L417.1 207.1 L407.1 218.2 L392.2 225.6 L373.3 230.1 L351.6 234.3 L328.0 240.3 L303.6 247.3 L279.2 252.8 L256.2 254.3 L236.1 251.0 L219.4 243.9 L206.4 234.5 L196.6 224.2 L189.3 213.3 L183.9 201.3 L179.7 188.0 L176.0 173.5 L172.6 159.5 L169.4 148.2 L166.5 141.6 L164.0 139.7 L162.2 140.2 L161.6 140.3 L163.1 138.4 L167.5 135.5 L174.9 133.9 L184.3 134.9 L194.3 137.7 L204.1 139.8 L213.5 139.1 L223.1 135.7 L233.3 131.0 L244.5 126.6 L256.5 122.4 L269.0 117.8 L281.3 112.4 L292.7 106.9 L302.6 102.9 L311.0 101.3 L318.8 102.0 L327.2 103.9 L336.2 106.3 L345.0 109.3 L352.2 113.3 L357.4 118.2 L361.6 123.1 L367.1 126.6 L375.4 128.1 L386.1 128.2 L397.7 127.8 L408.1 127.4 L416.7 126.8 L423.5 124.6 L429.2 120.1 L433.8 113.3 L437.0 105.5 L438.6 98.5 L439.0 93.5 L439.1 90.5 L439.5 88.5 L440.1 85.9 L440.6 82.1 L440.9 77.0 L441.4 71.2 L442.5 64.9 L443.7 58.3 L444.1 51.8 L442.6 46.5 L439.3 44.3 L435.4 45.8 L432.1 50.3 L430.2 55.5 L429.1 59.4 L428.0 61.8 L426.3 63.7 L424.0 66.5 L421.3 70.0 L418.3 72.6 L414.7 72.8 L410.4 70.4 L405.7 67.0 L400.9 64.1 L396.1 62.2 L391.0 60.2 L384.9 56.9 L378.2 51.9 L372.3 45.9 L368.7 40.0 L368.2 35.3 L370.1 32.0 L373.2 30.2 L376.1 30.0 L378.6 31.2 L380.8 33.7 L383.2 37.2 L385.5 41.3 L386.9 45.3 L386.9 48.8 L385.5 51.6 L382.9 54.4 L379.8 58.3 L376.6 64.4 L373.5 72.3 L370.5 80.4 L367.8 86.5 L365.2 89.5 L362.5 90.4 L359.3 91.0 L355.0 92.3 L349.6 93.6 L343.6 92.8 L338.5 88.8 L335.9 82.2 L336.6 75.5 L340.1 70.7 L344.4 68.1 L347.6 66.8 L349.1 66.0 L349.9 65.9 L351.6 67.4 L355.3 70.8 L360.5 75.0 L365.4 78.4 L368.1 80.3 L368.0 81.9 L365.8 84.6 L362.9 88.7 L360.7 93.0 L359.6 95.9 L359.7 96.7 L360.1 96.2 L360.3 95.9 L359.8 96.3 L358.8 96.6 L357.2 95.8 L354.8 93.3 L350.8 89.7 L344.8 86.2 L337.4 83.1 L330.5 80.6 L326.2 78.2 L326.0 75.8 L329.7 73.4 L335.7 71.2 L341.8 69.8 L346.4 70.2 L349.1 73.3 L350.5 79.2 L351.1 86.2 L351.8 91.5 L352.6 93.3 L353.3 91.8 L353.2 89.7 L351.7 89.8 L348.4 92.8 L343.4 96.9 L337.6 99.1 L331.7 97.7 L326.6 93.6 L322.4 89.2 L318.6 86.6 L314.9 86.2"/>
+      <circle style="--c:#0072B2" cx="381.6" cy="157.2" r="5"/>
+      <circle style="--c:#D55E00" cx="381.8" cy="135.2" r="5"/>
+      <circle style="--c:#009E73" cx="314.9" cy="86.2" r="5"/>
+    </svg>
+    <div class="controls">
+      <button type="button" class="play">Play</button>
+      <input type="range" min="0" max="250" value="250" aria-label="Time">
+      <output></output>
+    </div>
+    <ul class="key">
+      <li style="--c:#0072B2">Famous</li>
+      <li style="--c:#D55E00">Unfamiliar</li>
+      <li style="--c:#009E73">Scrambled</li>
+    </ul>
+    <figcaption>The MEG response to famous faces, unfamiliar faces and scrambled images, averaged over 16 people. These are the trajectories of Figure 3b, seen on the first two principal components. Drag the slider to move through time.</figcaption>
+    <script type="application/json" class="player-data">{"ms": [-200, -196, -192, -188, -184, -180, -176, -172, -168, -164, -160, -156, -152, -148, -144, -140, -136, -132, -128, -124, -120, -116, -112, -108, -104, -100, -96, -92, -88, -84, -80, -76, -72, -68, -64, -60, -56, -52, -48, -44, -40, -36, -32, -28, -24, -20, -16, -12, -8, -4, 0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 148, 152, 156, 160, 164, 168, 172, 176, 180, 184, 188, 192, 196, 200, 204, 208, 212, 216, 220, 224, 228, 232, 236, 240, 244, 248, 252, 256, 260, 264, 268, 272, 276, 280, 284, 288, 292, 296, 300, 304, 308, 312, 316, 320, 324, 328, 332, 336, 340, 344, 348, 352, 356, 360, 364, 368, 372, 376, 380, 384, 388, 392, 396, 400, 404, 408, 412, 416, 420, 424, 428, 432, 436, 440, 444, 448, 452, 456, 460, 464, 468, 472, 476, 480, 484, 488, 492, 496, 500, 504, 508, 512, 516, 520, 524, 528, 532, 536, 540, 544, 548, 552, 556, 560, 564, 568, 572, 576, 580, 584, 588, 592, 596, 600, 604, 608, 612, 616, 620, 624, 628, 632, 636, 640, 644, 648, 652, 656, 660, 664, 668, 672, 676, 680, 684, 688, 692, 696, 700, 704, 708, 712, 716, 720, 724, 728, 732, 736, 740, 744, 748, 752, 756, 760, 764, 768, 772, 776, 780, 784, 788, 792, 796, 800], "paths": [["188.2 110.2", "191.3 112.0", "194.7 111.7", "198.1 111.3", "200.9 112.0", "202.1 113.6", "201.5 114.7", "200.1 113.8", "199.6 111.3", "201.1 108.8", "203.8 108.2", "206.2 109.9", "206.7 112.8", "205.6 115.1", "204.0 115.7", "203.1 115.1", "203.4 114.1", "204.5 113.6", "206.3 113.7", "209.3 114.4", "214.2 115.6", "220.9 117.7", "228.5 120.8", "235.2 124.1", "239.6 126.7", "241.6 128.4", "241.9 129.5", "241.4 131.1", "240.4 133.3", "238.7 135.3", "236.4 136.2", "233.6 135.5", "230.6 134.4", "227.7 133.9", "225.3 134.8", "223.1 136.5", "220.6 138.3", "217.1 140.1", "212.8 142.2", "208.1 144.7", "204.5 147.3", "203.1 149.1", "204.0 149.7", "206.1 149.9", "207.9 150.3", "208.5 151.2", "208.1 151.7", "207.5 151.3", "207.1 149.7", "206.5 147.8", "205.5 146.1", "204.7 144.4", "205.5 142.7", "209.1 141.0", "214.8 140.1", "220.3 140.5", "223.3 141.2", "222.9 141.0", "220.4 140.0", "218.2 139.6", "217.2 142.1", "216.7 147.6", "215.1 153.1", "211.3 153.4", "205.7 143.9", "199.6 124.0", "194.4 96.8", "190.1 68.6", "185.9 46.7", "180.9 36.2", "176.1 38.5", "174.5 49.6", "181.1 62.3", "200.2 71.1", "233.1 76.2", "275.6 84.0", "320.4 102.0", "359.5 131.8", "388.9 167.3", "409.1 198.5", "423.2 218.7", "434.1 229.3", "442.2 237.3", "447.1 248.0", "449.1 261.9", "450.2 275.0", "452.2 285.1", "454.9 294.4", "455.8 307.5", "451.9 326.9", "442.2 350.0", "427.9 371.2", "410.8 386.5", "391.5 395.8", "369.5 401.9", "344.8 406.9", "319.7 410.0", "297.8 408.7", "281.3 401.4", "270.0 389.0", "261.5 373.9", "253.7 358.0", "246.7 342.0", "241.9 325.5", "239.9 308.8", "239.1 293.3", "237.4 280.7", "233.6 271.2", "229.6 263.4", "227.8 256.0", "229.4 248.9", "233.0 243.5", "236.0 241.8", "236.7 243.6", "235.8 246.8", "235.7 248.0", "238.2 245.5", "243.4 240.4", "250.3 235.4", "258.0 233.2", "267.0 234.9", "277.6 239.6", "289.8 245.8", "302.7 252.5", "315.4 259.0", "327.9 265.0", "341.1 269.8", "355.8 273.2", "371.5 275.8", "386.6 278.7", "399.6 282.1", "410.2 285.3", "419.2 287.0", "427.7 285.8", "436.3 281.7", "444.6 275.8", "451.9 269.8", "458.0 264.8", "463.1 261.6", "467.7 260.0", "472.0 259.2", "475.7 258.2", "478.0 255.7", "478.4 251.3", "477.0 245.8", "474.3 240.7", "471.1 237.4", "468.2 236.0", "466.0 235.8", "464.9 235.6", "464.9 235.0", "465.7 234.0", "466.8 232.8", "467.1 231.1", "465.8 228.7", "462.9 226.0", "459.7 223.9", "458.1 222.9", "459.1 222.0", "461.7 219.3", "463.8 213.3", "463.6 204.7", "461.0 195.7", "458.1 189.0", "456.9 185.7", "458.0 184.7", "460.4 184.2", "462.6 183.1", "463.8 182.1", "464.6 182.3", "465.8 184.3", "467.6 187.2", "469.0 189.5", "469.3 190.1", "468.1 189.3", "466.1 187.9", "464.2 186.4", "463.3 185.1", "463.2 183.6", "463.7 182.0", "464.0 180.3", "463.7 178.6", "462.3 176.3", "459.2 172.9", "454.4 168.0", "448.4 162.0", "442.5 156.4", "438.3 152.4", "436.9 150.7", "438.2 151.2", "440.9 153.1", "443.6 155.8", "445.2 159.4", "446.0 164.1", "447.0 169.9", "448.9 175.9", "451.5 180.3", "454.0 182.3", "455.5 182.2", "455.8 181.7", "455.0 182.1", "453.3 183.4", "450.8 183.9", "447.8 181.4", "445.4 175.3", "444.5 167.0", "445.5 159.0", "447.6 153.1", "448.9 149.7", "448.2 147.4", "445.2 144.9", "440.6 141.1", "435.4 136.3", "429.8 131.7", "423.8 128.5", "417.9 127.8", "413.2 130.0", "410.5 134.5", "410.1 140.2", "411.3 145.5", "412.7 149.4", "413.5 151.9", "413.6 153.8", "413.1 155.8", "411.9 158.2", "410.4 160.3", "409.0 161.1", "408.0 160.4", "407.4 158.5", "406.6 156.4", "404.7 154.3", "401.2 151.8", "396.9 148.1", "393.0 143.1", "390.4 137.4", "388.6 132.0", "386.7 127.5", "384.0 123.4", "381.1 118.6", "379.0 113.0", "378.7 107.9", "380.1 105.0", "382.1 105.6", "383.6 109.1", "383.9 114.2", "383.5 119.8", "382.9 125.9", "382.8 133.4", "383.0 142.2", "382.8 150.9", "381.6 157.2"], ["193.1 94.8", "189.7 99.2", "189.0 104.0", "189.7 108.4", "189.8 112.0", "188.2 114.7", "186.0 116.8", "185.5 118.7", "188.0 120.7", "192.6 122.9", "197.1 125.0", "199.9 126.1", "201.1 126.0", "202.0 125.0", "203.5 124.3", "205.9 124.4", "208.7 125.2", "211.9 125.8", "215.9 125.7", "221.1 125.4", "226.6 125.9", "231.0 127.4", "232.8 128.8", "231.7 128.4", "228.5 125.5", "224.9 121.1", "222.4 117.7", "221.8 117.4", "223.2 120.2", "226.3 124.4", "229.9 128.4", "233.0 131.5", "234.4 134.4", "233.6 137.6", "230.9 141.2", "227.1 144.3", "223.5 146.6", "220.8 148.1", "219.3 149.4", "218.6 150.0", "218.0 149.0", "217.0 145.7", "215.7 140.8", "214.8 136.3", "214.7 134.0", "215.6 134.0", "217.2 134.9", "219.0 135.1", "220.2 133.9", "220.3 132.0", "218.6 130.2", "214.7 128.5", "209.0 126.9", "202.9 125.8", "197.9 126.0", "195.2 127.6", "194.2 129.4", "193.6 129.8", "192.3 129.0", "190.7 129.6", "189.9 134.8", "190.6 144.9", "192.2 155.8", "192.9 160.6", "191.6 154.0", "188.9 135.5", "186.8 109.8", "187.0 84.0", "189.8 64.4", "193.3 53.9", "196.0 51.2", "199.1 53.0", "206.9 55.5", "224.3 57.4", "253.3 60.9", "290.5 70.5", "328.5 89.2", "360.5 115.9", "383.4 145.0", "399.4 170.1", "412.6 188.5", "425.2 203.1", "436.3 219.0", "443.8 239.0", "447.4 261.6", "449.7 282.9", "453.4 300.4", "458.7 315.1", "462.4 329.8", "460.1 345.4", "449.8 360.2", "432.6 371.3", "411.8 377.6", "389.2 380.3", "365.3 381.6", "339.6 381.8", "313.1 379.1", "288.6 371.7", "268.7 359.6", "254.1 344.9", "243.3 330.3", "234.0 316.5", "225.2 302.4", "217.6 287.0", "212.6 270.6", "210.6 255.3", "210.4 243.5", "210.1 236.0", "208.7 232.0", "207.1 229.5", "206.9 227.2", "209.7 224.6", "215.2 222.1", "222.3 220.4", "229.0 219.7", "234.3 219.9", "238.2 220.7", "241.3 221.8", "244.6 222.5", "248.8 222.5", "254.2 222.0", "261.2 221.4", "269.9 221.5", "280.2 222.5", "291.9 224.2", "304.5 225.8", "317.3 227.3", "329.7 229.2", "341.8 232.3", "354.2 237.1", "367.8 243.3", "382.5 249.5", "397.3 254.5", "410.4 257.9", "420.8 259.8", "428.7 261.0", "435.4 261.9", "441.9 262.5", "448.3 262.6", "453.6 261.6", "456.5 259.2", "456.9 255.3", "455.8 250.1", "454.7 244.0", "454.6 237.5", "455.3 231.2", "456.1 225.3", "456.2 220.3", "455.2 216.4", "453.5 213.8", "451.7 212.7", "450.1 212.7", "448.9 213.1", "448.2 213.2", "448.0 212.7", "448.0 211.9", "447.8 211.3", "447.1 211.0", "445.8 210.5", "444.4 209.3", "443.7 207.3", "443.6 204.8", "443.6 202.7", "442.9 201.1", "440.9 200.1", "438.6 199.1", "437.1 197.9", "437.5 196.2", "439.5 194.0", "441.5 191.5", "442.2 188.9", "441.4 186.6", "440.2 184.7", "439.8 183.0", "440.4 181.1", "441.1 178.5", "441.2 175.4", "440.4 172.4", "439.5 170.1", "439.0 168.3", "438.5 166.4", "436.8 163.8", "433.5 160.4", "429.8 157.3", "427.6 155.5", "428.2 155.8", "430.7 158.1", "432.8 161.8", "432.9 166.3", "431.2 170.6", "429.8 173.4", "430.3 173.8", "432.4 172.0", "434.0 169.1", "433.2 166.9", "430.4 166.5", "427.9 167.0", "427.8 166.8", "430.3 164.5", "433.4 160.1", "434.8 155.4", "433.7 152.3", "431.3 151.7", "429.1 153.3", "427.6 155.7", "425.7 157.7", "422.7 158.6", "418.6 158.5", "414.4 157.7", "411.2 156.9", "409.0 156.1", "407.4 155.1", "406.0 153.4", "405.4 150.5", "405.9 147.1", "407.4 144.1", "408.9 142.7", "409.7 143.1", "410.0 144.3", "410.7 144.8", "412.2 143.9", "414.1 142.2", "414.8 141.1", "413.4 141.5", "410.4 143.1", "407.2 144.0", "404.8 142.9", "403.4 140.0", "402.1 137.0", "400.3 135.8", "398.0 136.7", "395.6 138.1", "393.7 138.1", "391.9 135.9", "390.0 132.4", "387.9 129.4", "385.8 127.9", "384.1 127.7", "382.9 127.9", "382.3 128.2", "382.6 129.3", "384.4 132.0", "387.4 135.8", "391.0 139.4", "393.9 141.2", "395.1 140.8", "394.6 139.1", "392.8 137.3", "390.1 136.3", "386.5 135.7", "381.8 135.2"], ["194.4 99.4", "193.5 99.7", "192.9 99.1", "193.7 98.4", "195.4 98.1", "197.0 98.5", "197.5 100.0", "197.0 102.8", "196.0 106.5", "195.3 110.5", "195.4 113.7", "196.6 115.6", "199.3 116.5", "203.4 117.0", "208.2 117.5", "212.5 118.2", "215.4 119.2", "217.0 121.0", "218.0 123.8", "219.2 127.6", "220.0 131.4", "219.6 134.4", "217.7 136.3", "215.5 137.6", "214.8 139.1", "217.1 141.1", "221.5 143.0", "225.6 143.8", "226.5 143.2", "223.7 141.2", "218.9 138.5", "214.7 135.9", "212.9 134.0", "212.9 133.1", "213.4 133.2", "213.6 134.2", "214.7 135.9", "218.0 137.7", "223.6 139.2", "229.7 140.1", "233.6 140.2", "234.2 139.9", "232.8 139.9", "231.2 140.8", "230.5 142.8", "229.5 145.3", "226.5 146.8", "220.8 146.8", "213.6 145.8", "206.9 145.3", "202.0 146.1", "198.8 147.6", "197.1 148.2", "197.4 146.9", "200.0 144.3", "204.5 141.7", "209.0 140.0", "211.5 138.5", "211.5 136.2", "210.8 133.5", "211.3 132.4", "213.4 134.6", "214.7 139.3", "212.8 141.5", "206.9 134.9", "199.1 116.3", "192.7 88.5", "189.4 60.0", "188.1 40.9", "187.0 36.8", "185.7 45.8", "187.1 59.5", "195.5 69.4", "213.8 72.1", "241.5 71.6", "274.6 75.4", "308.0 88.4", "338.2 109.3", "364.2 131.5", "386.6 148.8", "405.7 159.2", "421.0 165.4", "431.1 170.5", "435.0 175.4", "434.0 178.8", "430.5 180.1", "427.2 181.3", "424.9 185.7", "422.3 195.0", "417.1 207.1", "407.1 218.2", "392.2 225.6", "373.3 230.1", "351.6 234.3", "328.0 240.3", "303.6 247.3", "279.2 252.8", "256.2 254.3", "236.1 251.0", "219.4 243.9", "206.4 234.5", "196.6 224.2", "189.3 213.3", "183.9 201.3", "179.7 188.0", "176.0 173.5", "172.6 159.5", "169.4 148.2", "166.5 141.6", "164.0 139.7", "162.2 140.2", "161.6 140.3", "163.1 138.4", "167.5 135.5", "174.9 133.9", "184.3 134.9", "194.3 137.7", "204.1 139.8", "213.5 139.1", "223.1 135.7", "233.3 131.0", "244.5 126.6", "256.5 122.4", "269.0 117.8", "281.3 112.4", "292.7 106.9", "302.6 102.9", "311.0 101.3", "318.8 102.0", "327.2 103.9", "336.2 106.3", "345.0 109.3", "352.2 113.3", "357.4 118.2", "361.6 123.1", "367.1 126.6", "375.4 128.1", "386.1 128.2", "397.7 127.8", "408.1 127.4", "416.7 126.8", "423.5 124.6", "429.2 120.1", "433.8 113.3", "437.0 105.5", "438.6 98.5", "439.0 93.5", "439.1 90.5", "439.5 88.5", "440.1 85.9", "440.6 82.1", "440.9 77.0", "441.4 71.2", "442.5 64.9", "443.7 58.3", "444.1 51.8", "442.6 46.5", "439.3 44.3", "435.4 45.8", "432.1 50.3", "430.2 55.5", "429.1 59.4", "428.0 61.8", "426.3 63.7", "424.0 66.5", "421.3 70.0", "418.3 72.6", "414.7 72.8", "410.4 70.4", "405.7 67.0", "400.9 64.1", "396.1 62.2", "391.0 60.2", "384.9 56.9", "378.2 51.9", "372.3 45.9", "368.7 40.0", "368.2 35.3", "370.1 32.0", "373.2 30.2", "376.1 30.0", "378.6 31.2", "380.8 33.7", "383.2 37.2", "385.5 41.3", "386.9 45.3", "386.9 48.8", "385.5 51.6", "382.9 54.4", "379.8 58.3", "376.6 64.4", "373.5 72.3", "370.5 80.4", "367.8 86.5", "365.2 89.5", "362.5 90.4", "359.3 91.0", "355.0 92.3", "349.6 93.6", "343.6 92.8", "338.5 88.8", "335.9 82.2", "336.6 75.5", "340.1 70.7", "344.4 68.1", "347.6 66.8", "349.1 66.0", "349.9 65.9", "351.6 67.4", "355.3 70.8", "360.5 75.0", "365.4 78.4", "368.1 80.3", "368.0 81.9", "365.8 84.6", "362.9 88.7", "360.7 93.0", "359.6 95.9", "359.7 96.7", "360.1 96.2", "360.3 95.9", "359.8 96.3", "358.8 96.6", "357.2 95.8", "354.8 93.3", "350.8 89.7", "344.8 86.2", "337.4 83.1", "330.5 80.6", "326.2 78.2", "326.0 75.8", "329.7 73.4", "335.7 71.2", "341.8 69.8", "346.4 70.2", "349.1 73.3", "350.5 79.2", "351.1 86.2", "351.8 91.5", "352.6 93.3", "353.3 91.8", "353.2 89.7", "351.7 89.8", "348.4 92.8", "343.4 96.9", "337.6 99.1", "331.7 97.7", "326.6 93.6", "322.4 89.2", "318.6 86.6", "314.9 86.2"]]}</script>
+  </figure>
+  </div>
+  <div class="stripe"></div>
+</header>
+
+<main>
+  <section id="about">
+    <div class="wide split">
+      <header><h2>About</h2></header>
+      <div class="prose">
+        <div>
+          <h3>The primer</h3>
+          <p>
+            Neural activity can be described as a point moving through a high-dimensional
+            state space. This view has shaped systems neuroscience through recordings of
+            neuronal populations, but it is still little used with non-invasive human
+            recordings such as EEG and MEG.
+          </p>
+          <p>
+            The primer presents trajectory analysis based on principal component analysis
+            (PCA) as an accessible way in. It explains how to organise EEG or MEG activity
+            into neural states, project them onto a few components, and read the result as
+            trajectories that show how distributed activity evolves over time. It also
+            covers the limits of PCA and the problems specific to EEG and MEG: spatial
+            mixing, sensitivity to preprocessing, validation and overinterpretation.
+            <a href="https://arxiv.org/abs/2609.32315">Read the preprint on arXiv.</a>
+          </p>
+        </div>
+        <div>
+          <h3>What this site is for</h3>
+          <p>
+            The paper works through two examples: motor execution and imagery in EEG, and
+            face perception in MEG. Every analysis behind them was run on the full cohort,
+            and each run wrote an interactive report with its figures, tables, statistics
+            and settings. This site publishes those reports.
+          </p>
+          <p>
+            Use it to look closer at a figure from the paper, to check the numbers behind
+            it, or to see the analyses that did not fit in the paper: other sensor
+            selections, other contrasts, and a comparison of PCA with nonlinear methods.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="paper">
+    <div class="wide split">
+      <header>
+        <h2>Results in the paper</h2>
+        <p>The reports behind Figures 2 and 3. The plots are drawn from the reports themselves.</p>
+      </header>
+      <div class="results">
+    <a class="result" href="view.html#eegbci/main/overview">
+        <svg class="plot" viewBox="0 0 320 200" aria-hidden="true"><path style="--c:#d55e00" d="M22.8 107.1 L22.9 107.1 L22.8 107.3 L22.2 107.5 L22.0 107.6 L22.3 107.6 L22.7 107.7 L22.8 108.1 L23.0 108.5 L23.1 108.7 L22.9 109.0 L22.7 109.4 L22.1 109.5 L21.1 109.2 L20.4 109.0 L20.5 108.8 L21.3 108.5 L22.7 108.2 L24.9 107.9 L27.9 107.7 L30.7 107.2 L33.2 107.0 L35.6 107.2 L37.9 107.6 L39.5 108.1 L40.6 108.7 L41.6 109.4 L42.2 110.0 L41.4 110.4 L39.5 110.7 L37.8 110.7 L37.1 110.5 L36.5 110.3 L35.6 110.1 L34.6 109.5 L34.0 108.9 L34.1 108.4 L34.3 107.9 L34.7 107.1 L35.6 106.2 L37.3 105.4 L39.5 104.8 L41.1 104.2 L41.8 103.4 L42.3 102.2 L43.0 100.9 L43.6 99.7 L43.8 98.5 L43.9 97.1 L44.3 95.8 L44.9 94.8 L45.6 94.1 L46.6 93.3 L47.0 92.1 L45.6 90.6 L42.7 89.3 L39.6 87.9 L37.5 86.4 L36.4 84.6 L36.3 82.4 L36.9 79.7 L38.4 76.1 L41.2 71.8 L45.7 67.1 L51.8 62.2 L59.6 57.2 L69.5 51.9 L81.9 46.4 L96.4 41.0 L112.1 35.9 L128.1 31.0 L144.0 26.3 L159.8 22.2 L175.4 19.0 L190.0 16.8 L203.2 15.3 L215.7 14.4 L228.5 14.0 L241.4 14.2 L253.4 15.1 L263.7 16.5 L272.4 18.3 L279.7 20.4 L285.9 23.1 L291.5 26.4 L296.8 30.3 L301.1 34.3 L304.2 38.3 L305.8 42.5 L306.0 47.2 L305.2 52.4 L304.1 57.5 L303.2 62.6 L302.5 67.8 L302.0 73.4 L301.8 78.9 L301.2 83.9 L299.2 88.6 L296.4 93.1 L294.0 97.7 L292.1 102.1 L289.9 106.1 L287.3 109.8 L284.6 113.4 L281.8 116.8 L278.7 119.8 L274.8 122.2 L270.2 124.3 L265.4 126.3 L260.6 128.2 L255.6 129.5 L249.7 130.4 L242.9 131.0 L236.3 131.6 L230.3 132.1 L224.0 132.7 L216.4 133.3 L208.4 133.5 L200.8 133.5 L193.4 133.5 L185.4 133.5 L177.3 133.4 L170.2 133.1 L164.4 133.1 L159.0 132.9 L153.2 132.4 L146.8 131.7 L140.5 131.1 L134.8 130.5 L129.6 130.2 L124.6 130.1 L119.9 130.1 L115.9 130.1 L112.1 130.1 L107.4 130.2 L101.9 130.0 L96.6 129.8 L92.2 129.7 L88.6 129.8 L85.2 129.6 L81.7 129.4 L78.6 129.3 L75.7 129.5 L72.6 129.5 L69.1 129.4 L65.5 129.5 L62.5 129.6 L60.2 129.8 L58.2 129.9 L55.8 130.0 L53.4 130.0 L51.5 129.9 L49.9 129.4 L48.0 128.8 L45.8 128.2 L44.3 127.9 L44.3 127.7 L45.2 127.1 L46.5 126.4 L47.9 125.8 L49.2 125.7 L50.4 125.6 L51.4 125.5 L52.3 125.6 L53.1 125.9 L53.7 126.1 L53.8 125.7 L53.3 124.8 L52.7 123.9 L52.3 123.4 L51.8 123.2 L51.5 122.8 L51.7 122.0 L52.0 121.0 L51.6 120.1 L50.5 119.2 L49.8 118.3 L49.3 117.5 L48.6 117.0 L47.8 116.6 L46.5 116.2 L43.9 115.6"/><path style="--c:#0072b2" d="M37.3 107.2 L36.8 107.0 L35.1 107.0 L32.7 107.2 L30.5 107.4 L29.0 107.7 L27.8 107.9 L26.4 108.1 L25.0 107.8 L24.1 107.4 L23.9 106.9 L23.7 106.7 L23.5 106.9 L23.2 107.3 L23.2 107.5 L23.4 107.5 L23.5 107.4 L23.0 107.5 L21.9 107.5 L20.6 107.7 L19.4 108.0 L18.6 108.8 L18.1 109.5 L18.1 110.0 L18.5 110.0 L18.9 109.9 L19.1 109.7 L19.2 109.7 L18.7 109.7 L18.1 109.5 L18.1 109.3 L18.7 109.0 L18.7 108.4 L18.0 107.6 L17.0 106.9 L16.2 106.4 L15.3 106.2 L14.4 105.9 L14.0 105.5 L14.1 104.8 L14.4 103.7 L15.0 102.4 L16.0 101.2 L17.9 99.9 L20.5 98.7 L23.8 97.5 L26.9 96.5 L29.5 95.6 L32.1 95.1 L34.8 95.1 L37.3 95.6 L38.7 96.1 L39.0 96.9 L38.5 97.9 L37.0 98.9 L34.1 99.5 L29.9 99.8 L25.7 99.9 L22.7 99.5 L21.8 98.3 L22.1 96.3 L23.2 93.6 L25.7 90.2 L30.2 86.3 L36.7 81.7 L44.5 76.8 L53.8 71.7 L65.1 66.7 L78.6 62.1 L93.6 57.9 L108.8 54.1 L123.3 50.6 L137.1 47.8 L150.4 45.5 L163.3 43.6 L175.3 42.5 L186.5 42.2 L197.2 42.6 L207.2 43.6 L215.7 45.2 L222.5 47.1 L227.7 49.2 L231.4 51.7 L234.1 54.7 L236.1 57.8 L237.5 61.0 L238.0 64.5 L237.7 68.8 L237.1 73.7 L236.7 78.7 L236.8 84.0 L237.1 89.6 L237.0 95.2 L235.8 100.9 L233.8 106.6 L232.0 112.4 L231.0 118.1 L230.6 123.7 L229.7 129.1 L228.2 133.9 L226.0 138.3 L223.4 142.3 L220.2 145.9 L217.3 149.1 L215.2 152.0 L213.9 154.5 L213.0 156.7 L211.6 158.4 L208.9 159.9 L205.2 161.5 L201.5 162.9 L198.4 164.1 L195.3 165.1 L191.5 166.2 L186.9 167.0 L181.3 167.3 L174.6 167.5 L167.1 167.6 L159.3 167.8 L151.6 168.1 L144.1 168.3 L136.9 168.4 L129.9 168.2 L122.8 167.9 L115.5 167.6 L108.1 167.2 L100.3 166.8 L92.7 166.7 L85.5 166.7 L78.9 166.7 L72.9 166.5 L67.5 166.2 L62.2 165.7 L56.6 165.1 L50.9 164.7 L45.5 164.5 L40.6 164.4 L36.4 164.2 L32.9 164.0 L30.1 163.9 L28.0 163.7 L26.5 163.6 L25.6 163.9 L25.0 164.2 L24.6 164.6 L24.2 164.8 L24.1 164.9 L24.6 165.0 L25.5 165.0 L26.8 164.9 L28.2 164.5 L29.1 163.9 L29.4 163.1 L29.6 162.2 L29.6 161.1 L28.9 159.9 L27.9 159.0 L27.7 158.2 L28.3 157.3 L28.5 156.1 L27.7 154.7 L26.4 153.3 L25.4 152.3 L25.0 151.4 L24.8 150.6 L25.1 150.0 L25.9 149.7 L27.3 149.1 L28.9 148.3 L30.4 147.5 L31.3 146.8 L32.1 146.4 L33.3 145.8 L34.9 145.3 L36.4 144.6 L37.7 143.8 L38.7 142.8 L39.0 141.7 L38.9 140.5 L38.6 139.2 L38.4 138.0 L37.7 136.9"/><path class="dashed" style="--c:#d55e00" d="M20.7 107.5 L20.8 107.4 L21.6 107.1 L22.9 106.9 L24.3 106.8 L25.2 106.9 L25.9 107.1 L27.0 107.3 L28.8 107.6 L30.5 107.6 L31.1 107.4 L30.8 107.3 L30.3 107.5 L29.4 108.1 L28.1 108.6 L26.6 108.8 L25.9 108.7 L26.4 108.6 L27.5 108.8 L28.4 108.8 L28.8 108.6 L29.0 108.4 L29.5 108.2 L30.1 107.8 L30.8 107.2 L32.1 106.7 L33.8 106.3 L34.6 106.1 L33.9 106.1 L32.5 106.2 L31.0 106.2 L29.5 106.0 L28.2 106.0 L27.8 106.2 L28.0 106.4 L27.8 106.4 L27.2 106.5 L26.7 106.4 L26.5 106.1 L26.9 105.5 L28.5 104.8 L31.1 104.1 L33.7 103.4 L36.2 102.6 L38.3 101.6 L39.5 100.4 L39.9 99.3 L40.0 98.5 L40.1 97.5 L39.0 96.3 L37.2 95.3 L35.7 94.6 L34.3 93.7 L32.0 92.6 L28.9 91.3 L26.4 89.8 L24.7 88.0 L23.2 85.9 L21.8 83.4 L21.1 80.5 L21.3 77.2 L22.7 73.9 L25.0 70.4 L28.1 66.5 L32.6 62.3 L38.9 58.1 L46.6 54.0 L55.1 50.1 L64.4 46.4 L75.0 43.0 L87.2 40.0 L100.1 37.4 L113.2 35.2 L126.7 33.5 L141.0 32.1 L155.5 31.2 L169.3 30.9 L182.0 31.0 L193.7 31.6 L204.5 32.6 L214.1 34.0 L222.3 35.7 L229.2 38.0 L235.1 40.5 L240.1 43.2 L243.8 46.0 L246.1 48.9 L247.0 52.2 L247.4 55.9 L248.3 59.5 L249.4 63.0 L250.1 66.5 L250.6 70.3 L251.5 74.4 L252.9 78.4 L254.7 82.5 L256.9 86.7 L259.7 90.8 L263.0 94.7 L266.4 98.3 L269.2 101.8 L271.2 105.4 L272.2 108.7 L272.8 111.9 L273.7 114.9 L274.4 117.6 L274.1 119.9 L272.7 121.9 L270.8 123.8 L268.9 125.5 L266.5 127.0 L263.4 128.5 L259.6 130.0 L255.3 131.3 L251.1 132.6 L247.0 134.0 L242.1 135.4 L236.3 136.9 L230.8 138.4 L225.9 139.9 L220.5 141.3 L214.4 142.7 L208.3 144.0 L203.0 145.1 L198.1 145.8 L193.2 146.3 L188.4 146.9 L183.7 147.3 L179.2 147.0 L175.4 146.5 L171.9 146.0 L168.2 145.7 L164.1 145.3 L159.7 145.1 L154.8 145.0 L149.7 145.0 L145.1 144.9 L140.9 144.7 L136.6 144.7 L132.8 145.0 L129.7 145.5 L126.8 146.2 L123.1 146.7 L118.9 147.1 L115.1 147.3 L112.0 147.6 L109.0 148.0 L105.7 148.4 L102.2 148.8 L99.3 149.3 L97.3 149.7 L95.5 149.9 L93.2 149.8 L91.0 149.8 L89.6 149.8 L89.4 149.7 L89.8 149.3 L90.6 148.6 L91.3 147.6 L91.7 146.7 L91.7 145.9 L91.1 145.2 L89.8 144.3 L88.0 143.5 L86.4 142.7 L85.3 141.7 L84.4 140.7 L83.3 139.8 L81.5 139.2 L79.1 138.8 L76.7 138.3 L74.7 137.7 L73.1 136.9 L71.9 136.0 L71.3 135.1 L71.6 134.4 L71.6 133.7 L70.2 133.1 L67.5 132.4 L64.7 131.5 L62.4 130.6 L60.1 129.9"/><path class="dashed" style="--c:#0072b2" d="M16.9 110.5 L17.5 110.0 L19.1 109.6 L21.1 109.3 L22.8 109.1 L24.2 109.0 L25.6 108.9 L27.4 109.0 L29.2 109.2 L30.6 109.3 L31.8 109.1 L33.0 108.8 L33.8 108.5 L34.0 108.2 L33.5 107.7 L32.5 107.2 L31.0 106.8 L29.5 106.3 L28.5 105.8 L28.5 105.2 L29.0 104.6 L29.9 104.1 L31.2 103.7 L32.9 103.4 L34.6 103.2 L35.6 103.2 L35.8 103.4 L35.5 103.4 L35.2 103.3 L35.1 103.4 L34.7 103.8 L33.4 104.5 L31.4 105.2 L29.5 105.9 L27.7 106.6 L25.6 107.1 L23.4 107.4 L21.6 107.3 L20.5 107.1 L19.7 106.8 L19.0 106.6 L19.3 106.2 L20.9 105.7 L23.3 104.9 L25.2 104.0 L26.5 103.1 L27.8 102.3 L29.0 101.7 L30.2 101.5 L31.2 101.9 L32.3 102.5 L34.1 103.2 L36.1 103.8 L37.2 104.4 L36.6 104.9 L34.9 104.7 L33.3 103.8 L32.1 102.6 L31.3 101.3 L31.6 99.7 L33.9 97.5 L37.5 94.3 L41.7 90.7 L46.5 86.9 L52.7 82.9 L61.0 78.4 L71.0 73.5 L82.5 68.9 L95.5 65.2 L109.7 61.8 L124.6 58.2 L139.5 54.8 L153.9 52.1 L167.9 50.3 L181.4 49.3 L194.0 48.9 L205.0 49.3 L213.8 50.6 L220.9 52.8 L227.1 55.7 L232.4 59.0 L236.7 62.5 L240.0 66.1 L242.3 69.7 L243.8 73.3 L244.8 77.1 L245.5 81.0 L246.3 85.0 L247.5 88.8 L249.0 92.7 L250.2 96.5 L250.9 100.3 L251.4 104.3 L251.8 108.8 L251.9 113.5 L251.7 118.5 L251.1 123.5 L249.9 128.2 L248.6 132.4 L247.8 136.3 L247.2 140.3 L246.7 144.3 L246.5 147.8 L246.8 150.9 L247.0 153.8 L246.6 156.6 L245.8 158.9 L244.8 160.7 L243.5 162.3 L241.9 163.9 L239.9 165.4 L236.5 166.8 L231.5 168.0 L225.9 169.0 L220.1 170.1 L213.3 171.2 L205.3 172.2 L197.1 172.8 L189.7 173.6 L183.3 174.6 L177.5 175.7 L171.7 176.6 L165.7 177.3 L160.0 178.0 L155.3 178.6 L151.2 179.2 L147.0 179.7 L142.7 180.0 L138.7 180.3 L134.6 180.8 L129.8 181.3 L124.2 181.7 L118.7 182.1 L114.3 182.8 L110.8 183.7 L107.2 184.4 L103.1 184.8 L99.2 185.0 L95.9 185.3 L93.3 185.6 L91.4 185.9 L90.3 186.0 L89.4 185.7 L88.2 185.1 L86.6 184.5 L84.7 183.8 L82.5 183.1 L80.6 182.5 L79.6 182.0 L79.1 181.7 L77.9 181.4 L76.0 181.0 L74.0 180.4 L72.4 179.7 L71.1 179.3 L69.7 178.9 L68.8 178.2 L68.3 177.1 L68.2 175.8 L67.7 174.4 L65.9 172.8 L63.0 171.2 L60.2 169.5 L58.5 167.9 L57.3 166.4 L55.7 164.9 L53.9 163.2 L52.7 161.7 L51.6 160.5 L49.6 159.5 L46.5 158.6 L43.7 157.5 L41.6 156.5 L40.6 155.5 L40.5 154.6 L41.2 153.9 L41.6 153.2 L41.3 152.5 L40.5 151.6 L39.2 150.8 L37.8 150.0 L37.6 149.3"/></svg>
+        <ul class="key"><li style="--c:#d55e00">Right Hand (Exec)</li><li style="--c:#0072b2">Left Hand (Exec)</li><li class="dashed" style="--c:#d55e00">Right Hand (Imag)</li><li class="dashed" style="--c:#0072b2">Left Hand (Imag)</li></ul>
+        <p class="shows">Trajectories, PC 1 against PC 2</p>
+        <span class="figure-label">Figure 2</span>
+        <h3>Motor execution and imagery in EEG</h3>
+        <p>Left and right hand, executed and imagined, in 106 people. From regional ERPs to a shared PCA space, the trajectories, how far apart the conditions are and how fast the state moves.</p>
+        <span class="open">Open the report</span>
+    </a>
+    <a class="result" href="view.html#megfaces/main/sensors_right_occipital">
+        <svg class="plot" viewBox="0 0 320 200" aria-hidden="true"><path style="--c:#0072b2" d="M42.0 50.3 L43.4 50.4 L44.6 50.5 L45.4 50.7 L45.8 50.8 L46.0 50.9 L46.2 50.9 L46.6 50.9 L47.3 50.9 L48.5 51.1 L50.1 51.5 L52.1 52.0 L54.4 52.5 L57.1 53.1 L60.0 53.7 L63.0 54.2 L66.1 54.9 L69.1 55.7 L71.9 56.6 L74.3 57.5 L76.3 58.3 L77.6 59.1 L78.1 59.8 L77.9 60.3 L76.9 60.8 L75.4 61.3 L73.4 61.8 L71.0 62.3 L68.3 62.9 L65.4 63.5 L62.6 64.0 L59.9 64.6 L57.7 65.2 L55.9 65.8 L54.3 66.5 L53.0 67.2 L51.7 67.8 L50.6 68.3 L49.8 68.6 L49.2 68.8 L48.9 68.7 L49.0 68.6 L49.5 68.2 L50.3 67.8 L51.5 67.4 L52.7 67.1 L53.9 66.7 L54.9 66.2 L55.7 65.7 L56.6 65.4 L57.4 65.4 L58.1 65.7 L58.7 66.0 L58.7 66.1 L57.9 65.4 L56.3 63.6 L53.8 60.7 L50.8 56.8 L47.4 52.5 L43.9 48.4 L40.3 44.7 L37.4 41.4 L36.1 38.3 L37.5 35.1 L42.7 32.3 L52.0 30.6 L64.9 30.9 L80.6 33.8 L98.3 39.1 L117.4 46.1 L137.9 54.0 L159.4 62.2 L181.4 70.3 L203.0 78.5 L223.2 86.8 L240.9 95.4 L255.4 104.0 L266.3 112.4 L273.7 120.4 L278.0 127.8 L279.6 134.9 L278.6 141.8 L275.1 148.6 L269.2 155.3 L261.0 161.8 L250.5 167.9 L238.2 173.4 L224.4 178.1 L209.5 182.0 L193.8 184.7 L177.8 186.0 L162.0 185.7 L147.0 183.8 L133.2 180.6 L120.9 176.4 L110.3 171.5 L101.3 165.9 L94.0 159.9 L88.4 153.7 L84.2 147.4 L81.2 141.5 L79.1 136.1 L77.8 131.4 L76.9 127.5 L76.4 124.3 L76.3 121.7 L76.6 119.5 L77.6 117.7 L79.6 116.1 L82.6 115.0 L86.7 114.3 L91.5 114.2 L97.2 114.5 L103.6 115.2 L110.9 116.1 L119.4 117.1 L129.1 118.1 L139.9 119.3 L151.4 120.9 L163.5 122.8 L175.8 124.9 L188.1 127.1 L200.2 129.0 L212.0 130.4 L223.5 131.4 L234.5 131.8 L245.0 131.8 L254.8 131.5 L263.9 131.0 L272.0 130.3 L279.2 129.4 L285.5 128.4 L291.0 127.0 L295.7 125.3 L299.4 123.4 L302.2 121.6 L304.2 120.0 L305.3 118.6 L305.9 117.4 L306.0 116.3 L305.8 115.2 L305.4 114.2 L304.7 113.1 L303.7 111.9 L302.5 110.9 L301.1 110.0 L299.8 109.3 L298.8 108.7 L298.3 108.0 L298.1 107.1 L298.0 105.8 L297.7 104.2 L297.1 102.3 L296.3 100.4 L295.5 98.5 L295.1 96.7 L295.1 94.9 L295.4 93.2 L295.9 91.6 L296.5 90.0 L297.0 88.7 L297.4 87.7 L297.8 87.1 L298.4 86.9 L299.1 86.8 L299.7 86.9 L300.1 86.9 L300.3 86.9 L300.4 86.8 L300.4 86.7 L300.3 86.6 L300.0 86.3 L299.4 85.7 L298.2 84.8 L296.5 83.6 L294.4 82.3 L292.2 80.8 L290.0 79.4 L288.0 78.0 L286.2 76.7 L284.5 75.7 L283.0 74.8 L281.6 74.2 L280.4 74.0 L279.5 74.1 L279.3 74.6 L279.7 75.4 L280.8 76.5 L282.2 77.7 L283.7 79.0 L284.9 80.3 L285.7 81.5 L286.0 82.6 L286.0 83.2 L285.9 83.4 L285.8 82.9 L285.7 82.0 L285.5 80.7 L285.0 79.3 L284.2 77.8 L282.9 76.1 L281.4 74.2 L279.5 72.1 L277.3 69.8 L274.9 67.7 L272.3 65.8 L269.5 64.5 L266.7 63.7 L263.7 63.4 L260.8 63.4 L258.0 63.6 L255.5 63.9 L253.2 64.5 L251.4 65.4 L249.8 66.6 L248.6 67.9 L247.8 69.3 L247.3 70.4 L247.0 71.3 L246.6 71.9 L245.8 72.2 L244.5 72.1 L242.8 71.7 L241.0 71.1 L239.0 70.1 L236.9 68.8 L234.8 67.3 L232.6 65.6 L230.2 63.7 L227.9 61.6 L225.8 59.5 L223.9 57.5 L222.5 55.7 L221.5 54.3 L220.7 53.4 L220.1 52.9 L219.6 53.0 L219.3 53.6 L219.2 54.7 L219.3 56.3"/><path style="--c:#d55e00" d="M34.0 51.3 L34.6 52.6 L35.6 53.7 L36.8 54.5 L38.1 55.2 L39.6 55.7 L41.5 56.2 L43.9 56.5 L46.8 56.8 L49.9 57.0 L53.0 57.2 L55.9 57.4 L58.5 57.4 L60.7 57.4 L62.5 57.3 L64.1 57.0 L65.4 56.7 L66.5 56.5 L67.7 56.4 L68.8 56.6 L69.8 56.8 L70.4 57.1 L70.6 57.6 L70.5 58.1 L70.1 58.7 L69.7 59.6 L69.4 60.7 L69.1 62.0 L68.8 63.3 L68.4 64.5 L67.7 65.4 L66.5 65.9 L65.1 66.1 L63.5 66.1 L62.0 65.9 L60.9 65.7 L60.2 65.3 L60.0 64.8 L59.9 64.1 L59.9 63.3 L59.6 62.4 L58.8 61.5 L57.7 60.7 L56.3 60.1 L54.7 59.8 L53.0 59.6 L51.3 59.4 L49.2 59.1 L47.0 58.9 L44.5 59.0 L42.1 59.5 L40.0 60.5 L38.2 61.9 L36.8 63.0 L35.7 63.4 L34.8 62.7 L34.1 60.9 L33.8 58.3 L33.8 55.2 L34.1 52.0 L34.7 48.8 L36.1 45.6 L38.8 42.0 L43.8 38.1 L51.6 34.4 L62.7 31.8 L76.5 31.0 L92.4 32.4 L109.6 35.9 L127.5 41.0 L146.3 47.1 L165.7 54.0 L185.4 61.6 L204.8 70.0 L223.0 79.3 L239.2 89.1 L252.8 99.1 L263.6 108.9 L271.6 118.3 L277.0 127.1 L279.7 135.4 L279.6 143.1 L276.7 150.4 L271.0 157.0 L262.6 162.9 L251.7 167.7 L238.7 171.3 L223.8 173.7 L207.3 174.9 L189.6 175.0 L171.3 173.8 L153.2 171.4 L135.8 168.0 L119.8 163.6 L105.3 158.5 L92.8 152.8 L82.4 146.8 L73.9 140.8 L67.4 135.0 L62.4 129.6 L58.8 124.7 L56.5 120.2 L55.6 116.3 L55.9 112.9 L57.2 110.2 L59.3 108.1 L61.8 106.8 L64.5 105.9 L67.7 105.4 L71.3 104.9 L75.7 104.6 L80.8 104.4 L86.5 104.3 L92.7 104.4 L99.3 104.6 L106.4 104.9 L114.1 105.3 L122.5 105.8 L131.6 106.4 L141.6 107.2 L152.4 108.3 L163.9 109.7 L175.9 111.2 L188.1 112.7 L200.1 114.3 L211.7 115.9 L222.8 117.4 L233.4 118.8 L243.4 120.1 L252.7 121.2 L261.0 122.0 L268.0 122.2 L273.9 122.0 L278.5 121.3 L282.1 120.2 L285.0 118.8 L287.2 117.2 L288.8 115.3 L289.7 113.3 L290.0 111.3 L289.7 109.3 L289.1 107.4 L288.4 105.7 L287.8 104.1 L287.2 102.8 L286.7 101.7 L286.0 100.9 L285.2 100.3 L284.2 99.8 L283.3 99.5 L282.5 99.1 L281.9 98.7 L281.3 98.2 L280.6 97.7 L279.9 97.1 L279.0 96.5 L278.1 95.9 L277.5 95.2 L277.0 94.4 L276.7 93.5 L276.5 92.6 L276.2 91.6 L275.9 90.7 L275.6 89.9 L275.5 88.9 L275.5 87.9 L275.6 86.8 L275.8 85.7 L275.9 84.5 L275.9 83.4 L275.5 82.3 L274.8 81.1 L273.8 79.9 L272.8 78.7 L271.9 77.6 L271.1 76.7 L270.4 76.0 L269.8 75.6 L269.0 75.5 L268.3 75.7 L267.6 75.9 L267.1 76.1 L266.8 76.3 L266.8 76.6 L266.9 77.0 L266.9 77.5 L266.9 77.9 L266.8 78.2 L266.9 78.1 L267.0 77.7 L267.2 76.9 L267.4 76.0 L267.3 75.2 L266.9 74.5 L266.2 74.0 L265.4 73.7 L264.4 73.4 L263.3 73.0 L262.0 72.6 L260.3 72.2 L258.2 72.0 L255.8 72.0 L253.6 71.9 L251.5 71.7 L249.7 71.3 L248.2 70.8 L246.9 70.2 L245.9 69.6 L245.3 69.0 L245.1 68.5 L245.3 67.9 L245.8 67.3 L246.3 66.7 L246.6 66.3 L246.8 66.0 L246.7 65.9 L246.4 65.7 L245.8 65.5 L245.1 65.2 L244.1 64.8 L242.9 64.6 L241.4 64.3 L239.6 64.1 L237.6 63.7 L235.5 63.2 L233.5 62.6 L231.7 61.9 L229.9 61.3 L228.2 60.8 L226.6 60.5 L225.3 60.4 L224.5 60.3 L224.1 60.4 L224.1 60.5 L224.4 60.7 L224.8 61.0 L225.2 61.3 L225.5 61.6 L225.7 62.0 L225.6 62.3"/><path style="--c:#009e73" d="M38.5 46.4 L38.9 47.1 L39.7 47.8 L40.9 48.6 L42.4 49.4 L44.1 50.2 L45.7 51.1 L47.3 52.1 L49.1 53.1 L51.1 54.1 L53.0 55.1 L54.8 56.1 L56.3 57.0 L57.6 57.9 L58.7 58.9 L59.8 59.9 L60.8 61.0 L61.7 61.9 L62.3 62.8 L62.3 63.4 L62.0 63.7 L61.4 63.8 L60.9 63.8 L60.5 63.6 L60.4 63.5 L60.4 63.4 L60.4 63.2 L60.6 63.1 L60.9 62.9 L61.5 62.8 L62.3 62.7 L63.5 62.8 L64.8 63.0 L66.2 63.4 L67.6 63.9 L68.6 64.4 L69.2 64.9 L69.1 65.3 L68.2 65.6 L66.5 65.9 L64.0 66.2 L61.0 66.6 L58.1 66.9 L55.4 67.0 L53.3 67.1 L51.5 67.0 L50.1 66.7 L48.9 66.2 L48.0 65.7 L47.9 65.2 L48.4 64.7 L49.4 64.4 L50.5 64.2 L51.3 63.6 L51.5 62.4 L50.9 60.1 L49.7 56.8 L48.0 52.7 L46.0 48.5 L43.9 44.8 L42.0 41.8 L40.7 39.2 L40.8 36.7 L42.9 33.9 L47.9 31.2 L56.1 29.3 L67.3 29.0 L81.2 30.8 L97.1 34.4 L114.6 39.2 L133.5 44.5 L153.3 49.6 L173.4 54.4 L192.6 58.8 L210.1 63.3 L225.1 67.7 L237.2 72.3 L246.5 76.6 L252.8 80.6 L256.3 84.2 L256.8 87.3 L254.1 90.2 L248.5 93.0 L240.2 95.9 L229.6 98.8 L217.1 101.9 L203.0 104.9 L187.6 107.8 L171.0 110.1 L153.6 111.8 L135.8 112.5 L118.2 112.3 L101.4 111.3 L85.7 109.5 L71.6 107.1 L59.0 103.7 L48.2 99.7 L39.1 95.1 L31.6 90.4 L25.7 85.9 L21.0 81.7 L17.5 77.7 L15.2 74.1 L14.0 70.9 L14.0 68.1 L15.2 66.1 L17.5 64.7 L20.8 63.9 L25.1 63.4 L30.5 62.9 L37.0 62.4 L44.6 61.7 L53.3 60.7 L62.9 59.7 L73.0 58.5 L83.3 57.2 L93.5 55.9 L103.5 54.4 L113.5 52.9 L123.4 51.6 L133.2 50.5 L142.8 49.8 L151.9 49.4 L160.4 49.5 L168.4 49.8 L175.9 50.5 L183.5 51.3 L191.2 52.4 L199.0 53.4 L206.9 54.4 L214.7 55.3 L222.2 55.8 L229.4 56.0 L236.2 55.7 L242.8 54.9 L249.0 53.7 L254.8 52.2 L260.0 50.6 L264.4 48.9 L267.8 47.0 L270.5 44.9 L272.5 42.6 L274.0 40.2 L275.2 37.7 L276.0 35.2 L276.4 32.7 L276.5 30.5 L276.2 28.6 L275.6 26.9 L274.9 25.6 L274.0 24.5 L273.0 23.7 L271.8 23.1 L270.4 22.9 L268.7 23.1 L266.6 23.7 L264.3 24.6 L261.7 25.5 L259.0 26.5 L256.2 27.2 L253.3 27.7 L250.1 27.9 L246.5 27.8 L242.5 27.4 L238.2 26.7 L233.7 25.6 L229.4 24.2 L225.5 22.5 L222.2 20.8 L219.4 19.1 L217.2 17.6 L215.6 16.4 L214.5 15.4 L214.1 14.6 L214.3 14.1 L215.0 14.0 L216.0 14.2 L217.2 14.8 L218.1 15.8 L218.6 17.1 L218.7 18.8 L218.2 20.9 L217.3 23.1 L216.1 25.4 L214.4 27.6 L212.3 29.6 L209.7 31.6 L206.7 33.4 L203.3 35.1 L199.7 36.5 L196.2 37.5 L193.0 37.9 L190.3 37.9 L188.1 37.4 L186.5 36.5 L185.2 35.6 L184.2 34.6 L183.6 33.6 L183.6 32.7 L184.5 32.0 L186.3 31.4 L188.6 31.0 L191.2 31.0 L193.6 31.4 L195.4 32.1 L196.8 33.1 L197.7 34.3 L198.6 35.6 L199.4 36.8 L200.1 38.0 L200.5 39.0 L200.3 39.9 L199.7 40.6 L198.6 41.2 L197.2 41.5 L195.5 41.6 L193.4 41.3 L191.0 40.8 L188.3 40.1 L185.6 39.2 L183.1 38.3 L181.1 37.3 L179.7 36.2 L178.7 35.1 L178.0 34.2 L177.7 33.6 L177.7 33.5 L178.3 33.7 L179.5 34.1 L181.3 34.6 L183.5 35.1 L185.6 35.6 L187.1 36.4 L187.7 37.5 L187.4 38.7 L186.2 39.8 L184.4 40.6 L182.1 41.0 L179.5 41.1 L176.5 40.8"/></svg>
+        <ul class="key"><li style="--c:#0072b2">Famous</li><li style="--c:#d55e00">Unfamiliar</li><li style="--c:#009e73">Scrambled</li></ul>
+        <p class="shows">Trajectories, PC 1 against PC 2</p>
+        <span class="figure-label">Figure 3a–b</span>
+        <h3>Face perception in MEG</h3>
+        <p>Famous, unfamiliar and scrambled faces in 16 people, on 36 right-occipital sensors. The sensor-level response, then the trajectories in a shared PCA space.</p>
+        <span class="open">Open the report</span>
+    </a>
+    <a class="result" href="view.html#megfaces/spectral/sensors_right_occipital">
+        <svg class="plot" viewBox="0 0 320 200" aria-hidden="true"><path style="--c:#0072b2" d="M268.4 73.1 L266.4 72.1 L261.3 70.6 L258.3 69.2 L255.2 68.2 L253.7 67.3 L252.0 66.7 L251.5 66.0 L250.9 65.0 L251.4 63.2 L252.4 60.6 L254.9 57.0 L258.7 52.4 L264.3 47.0 L271.3 40.9 L279.3 34.3 L287.6 27.6 L295.2 21.5 L301.2 16.7 L304.4 14.1 L304.0 14.0 L299.5 16.7 L290.7 21.7 L277.5 28.7 L260.8 36.9 L240.8 46.4 L218.9 56.4 L195.6 66.7 L172.8 76.4 L150.6 85.7 L130.8 93.9 L113.2 101.2 L98.9 107.1 L86.7 111.8 L77.3 114.6 L68.6 115.8 L61.5 115.0 L54.0 112.9 L47.5 109.5 L40.2 105.8 L34.1 101.7 L27.6 98.3 L22.8 95.5 L18.2 94.2 L16.0 93.7 L14.0 94.1 L14.4 94.7 L14.7 96.1 L17.3 97.7 L19.4 99.9 L23.8 102.1 L27.6 104.8 L33.6 107.4 L38.6 110.4 L45.7 112.8 L51.4 115.1 L58.9 116.5 L64.8 117.9 L72.4 118.2 L77.9 118.3 L85.0 117.6 L89.7 117.3 L96.1 116.6"/><path style="--c:#d55e00" d="M265.5 71.5 L264.2 70.9 L260.8 70.0 L258.9 68.9 L256.6 68.2 L255.2 67.6 L253.5 67.6 L252.6 67.4 L251.6 66.8 L251.6 64.8 L252.2 61.3 L254.4 56.2 L257.9 50.3 L263.5 44.0 L270.5 38.2 L279.0 33.1 L287.8 29.1 L296.0 26.2 L302.4 24.9 L306.0 25.4 L306.0 27.5 L301.6 31.1 L292.9 35.9 L279.7 41.9 L262.9 49.1 L242.7 57.4 L220.6 66.4 L197.0 75.9 L173.9 85.4 L151.5 94.9 L131.6 103.6 L113.9 111.4 L99.5 117.4 L87.5 122.0 L78.3 124.8 L70.4 126.5 L64.4 126.9 L58.5 126.4 L53.8 124.5 L48.9 122.6 L45.1 120.3 L41.3 118.8 L39.0 117.4 L36.7 116.9 L36.0 116.4 L35.2 116.7 L36.3 117.0 L37.5 118.2 L40.8 119.2 L43.9 120.9 L49.0 122.1 L53.7 124.0 L59.9 125.7 L65.4 128.1 L72.5 129.8 L78.5 131.8 L86.0 132.7 L92.1 133.4 L99.6 133.1 L105.4 133.4 L112.6 133.2 L118.0 133.8 L125.1 133.2"/><path style="--c:#009e73" d="M269.7 72.6 L268.2 71.5 L264.2 69.6 L261.6 67.9 L258.4 66.8 L256.2 66.0 L253.5 65.7 L251.7 65.4 L249.9 65.0 L249.2 64.0 L249.1 62.2 L250.5 59.3 L252.9 55.5 L256.9 51.0 L261.8 46.0 L267.5 40.8 L273.0 36.3 L277.6 33.3 L280.6 32.7 L281.1 35.2 L278.5 40.5 L272.3 48.7 L262.3 59.2 L248.6 71.6 L232.1 85.4 L213.0 100.1 L192.9 114.8 L172.2 129.4 L152.6 143.2 L133.9 155.9 L117.7 166.7 L103.4 175.4 L92.1 181.5 L82.5 185.1 L75.6 186.0 L69.6 184.7 L65.4 181.2 L61.4 176.5 L58.7 170.7 L55.7 165.0 L54.1 159.3 L52.3 154.2 L52.2 149.3 L51.9 145.4 L53.1 141.8 L53.9 139.4 L56.1 137.1 L57.4 135.5 L60.1 133.6 L61.6 132.1 L64.6 130.2 L66.5 128.7 L70.2 126.7 L72.9 125.2 L77.4 123.5 L80.7 122.9 L85.7 122.3 L89.2 122.7 L94.4 122.9 L97.9 124.0 L103.1 124.5 L106.2 125.3 L111.0 124.9"/></svg>
+        <ul class="key"><li style="--c:#0072b2">Famous</li><li style="--c:#d55e00">Unfamiliar</li><li style="--c:#009e73">Scrambled</li></ul>
+        <p class="shows">Alpha power, PC 1 against PC 2</p>
+        <span class="figure-label">Figure 3c–d</span>
+        <h3>The same task, seen through alpha power</h3>
+        <p>Alpha-band power (8 to 12 Hz) as the neural state, in its own PCA space. The report also covers beta and low gamma.</p>
+        <span class="open">Open the report</span>
+    </a>
+    <a class="result" href="view.html#megfaces/decoding/best_models">
+        <svg class="plot" viewBox="0 0 320 200" aria-hidden="true"><path class="ref" d="M14 169.3 H306"/><path class="ref" d="M97.4 14 V186"/><path style="--c:var(--ink)" d="M14.0 159.3 L15.7 173.3 L17.3 180.8 L19.0 172.6 L20.7 165.5 L22.3 164.0 L24.0 173.0 L25.7 166.8 L27.3 162.4 L29.0 161.0 L30.7 166.9 L32.4 171.7 L34.0 175.6 L35.7 176.9 L37.4 176.0 L39.0 186.0 L40.7 182.2 L42.4 174.4 L44.0 165.8 L45.7 158.5 L47.4 155.3 L49.0 156.5 L50.7 146.8 L52.4 153.1 L54.0 160.9 L55.7 164.1 L57.4 161.0 L59.1 162.5 L60.7 169.2 L62.4 169.8 L64.1 172.9 L65.7 170.7 L67.4 176.1 L69.1 173.9 L70.7 165.5 L72.4 168.1 L74.1 161.5 L75.7 162.5 L77.4 155.5 L79.1 160.5 L80.7 160.6 L82.4 167.8 L84.1 166.3 L85.7 156.9 L87.4 149.7 L89.1 164.2 L90.8 163.7 L92.4 157.7 L94.1 159.8 L95.8 163.8 L97.4 163.9 L99.1 161.4 L100.8 165.1 L102.4 165.0 L104.1 167.5 L105.8 165.2 L107.4 162.2 L109.1 161.0 L110.8 163.0 L112.4 159.6 L114.1 168.6 L115.8 163.7 L117.5 158.7 L119.1 164.5 L120.8 163.7 L122.5 162.3 L124.1 155.9 L125.8 160.2 L127.5 151.8 L129.1 150.6 L130.8 159.1 L132.5 157.5 L134.1 151.2 L135.8 151.8 L137.5 146.6 L139.1 147.4 L140.8 139.6 L142.5 140.3 L144.1 137.1 L145.8 137.8 L147.5 138.7 L149.2 135.6 L150.8 134.9 L152.5 115.8 L154.2 105.3 L155.8 97.0 L157.5 80.5 L159.2 70.7 L160.8 63.7 L162.5 62.8 L164.2 61.2 L165.8 55.6 L167.5 57.0 L169.2 59.8 L170.8 69.8 L172.5 74.0 L174.2 79.6 L175.9 81.0 L177.5 82.3 L179.2 81.3 L180.9 79.4 L182.5 83.8 L184.2 82.9 L185.9 80.3 L187.5 78.0 L189.2 80.5 L190.9 85.0 L192.5 87.3 L194.2 77.9 L195.9 70.3 L197.5 69.8 L199.2 76.4 L200.9 82.7 L202.5 76.4 L204.2 77.4 L205.9 84.4 L207.6 90.6 L209.2 91.0 L210.9 98.1 L212.6 101.1 L214.2 102.7 L215.9 101.1 L217.6 110.7 L219.2 107.9 L220.9 105.0 L222.6 100.2 L224.2 102.5 L225.9 101.5 L227.6 96.9 L229.2 96.4 L230.9 95.3 L232.6 98.6 L234.3 91.6 L235.9 90.6 L237.6 82.9 L239.3 84.4 L240.9 85.3 L242.6 83.2 L244.3 76.2 L245.9 71.8 L247.6 73.5 L249.3 74.0 L250.9 71.0 L252.6 71.2 L254.3 73.4 L255.9 80.7 L257.6 79.6 L259.3 76.3 L260.9 70.5 L262.6 66.1 L264.3 66.3 L266.0 71.7 L267.6 68.1 L269.3 71.9 L271.0 71.2 L272.6 66.5 L274.3 63.2 L276.0 58.4 L277.6 57.5 L279.3 57.7 L281.0 56.4 L282.6 59.5 L284.3 63.2 L286.0 61.3 L287.6 60.3 L289.3 60.7 L291.0 62.1 L292.7 58.3 L294.3 60.1 L296.0 56.8 L297.7 58.5 L299.3 60.1 L301.0 56.6 L302.7 54.7 L304.3 56.2 L306.0 51.9"/><path style="--c:#56B4E9" d="M14.0 163.5 L15.7 174.4 L17.3 169.7 L19.0 165.0 L20.7 161.8 L22.3 166.8 L24.0 168.9 L25.7 166.6 L27.3 170.2 L29.0 161.4 L30.7 163.8 L32.4 157.1 L34.0 159.5 L35.7 160.6 L37.4 163.7 L39.0 167.1 L40.7 173.2 L42.4 177.9 L44.0 171.9 L45.7 173.3 L47.4 162.4 L49.0 165.9 L50.7 166.6 L52.4 163.3 L54.0 161.8 L55.7 162.1 L57.4 161.6 L59.1 168.7 L60.7 167.1 L62.4 178.6 L64.1 175.4 L65.7 182.3 L67.4 183.0 L69.1 178.3 L70.7 169.9 L72.4 166.3 L74.1 171.4 L75.7 170.7 L77.4 162.4 L79.1 160.8 L80.7 166.6 L82.4 174.5 L84.1 169.6 L85.7 174.7 L87.4 160.6 L89.1 156.8 L90.8 156.3 L92.4 161.4 L94.1 173.7 L95.8 172.7 L97.4 175.5 L99.1 179.7 L100.8 169.0 L102.4 165.6 L104.1 159.3 L105.8 155.9 L107.4 155.6 L109.1 158.8 L110.8 160.4 L112.4 156.2 L114.1 155.8 L115.8 158.6 L117.5 170.6 L119.1 173.5 L120.8 165.7 L122.5 160.3 L124.1 157.7 L125.8 156.9 L127.5 162.0 L129.1 165.0 L130.8 170.3 L132.5 164.0 L134.1 155.3 L135.8 150.2 L137.5 144.4 L139.1 142.3 L140.8 142.5 L142.5 138.3 L144.1 135.5 L145.8 134.8 L147.5 128.1 L149.2 128.0 L150.8 122.5 L152.5 116.2 L154.2 103.7 L155.8 94.2 L157.5 80.7 L159.2 71.4 L160.8 67.0 L162.5 66.0 L164.2 59.6 L165.8 59.0 L167.5 51.1 L169.2 50.8 L170.8 52.6 L172.5 61.2 L174.2 67.2 L175.9 71.0 L177.5 73.5 L179.2 72.8 L180.9 76.7 L182.5 78.3 L184.2 73.0 L185.9 74.1 L187.5 79.7 L189.2 78.0 L190.9 80.3 L192.5 74.5 L194.2 75.9 L195.9 77.2 L197.5 78.7 L199.2 85.8 L200.9 83.6 L202.5 88.0 L204.2 89.8 L205.9 89.1 L207.6 95.6 L209.2 101.5 L210.9 102.7 L212.6 113.6 L214.2 105.7 L215.9 101.3 L217.6 105.0 L219.2 107.6 L220.9 108.7 L222.6 102.9 L224.2 102.6 L225.9 97.9 L227.6 94.3 L229.2 86.0 L230.9 86.8 L232.6 91.5 L234.3 85.1 L235.9 84.8 L237.6 81.9 L239.3 83.6 L240.9 84.6 L242.6 81.3 L244.3 76.4 L245.9 75.8 L247.6 77.5 L249.3 81.3 L250.9 76.8 L252.6 77.3 L254.3 74.5 L255.9 79.6 L257.6 80.1 L259.3 81.2 L260.9 80.8 L262.6 74.3 L264.3 75.0 L266.0 75.3 L267.6 76.4 L269.3 76.9 L271.0 72.4 L272.6 64.9 L274.3 59.9 L276.0 60.9 L277.6 59.4 L279.3 57.0 L281.0 55.4 L282.6 54.4 L284.3 59.7 L286.0 57.2 L287.6 58.6 L289.3 58.7 L291.0 59.2 L292.7 56.6 L294.3 57.8 L296.0 59.2 L297.7 57.6 L299.3 59.7 L301.0 61.9 L302.7 64.8 L304.3 62.1 L306.0 56.7"/><path style="--c:#CC79A7" d="M14.0 163.1 L15.7 172.1 L17.3 167.4 L19.0 162.4 L20.7 160.5 L22.3 165.2 L24.0 169.0 L25.7 166.7 L27.3 166.2 L29.0 167.8 L30.7 168.4 L32.4 168.3 L34.0 172.9 L35.7 167.5 L37.4 157.1 L39.0 162.3 L40.7 167.5 L42.4 170.9 L44.0 167.7 L45.7 161.8 L47.4 152.6 L49.0 154.6 L50.7 159.3 L52.4 160.1 L54.0 160.3 L55.7 157.4 L57.4 160.8 L59.1 152.4 L60.7 151.7 L62.4 150.5 L64.1 155.4 L65.7 157.1 L67.4 156.2 L69.1 153.7 L70.7 156.0 L72.4 153.6 L74.1 149.4 L75.7 147.4 L77.4 149.8 L79.1 148.8 L80.7 152.0 L82.4 151.2 L84.1 150.5 L85.7 155.1 L87.4 153.4 L89.1 154.4 L90.8 154.6 L92.4 150.3 L94.1 145.9 L95.8 149.4 L97.4 147.2 L99.1 147.8 L100.8 144.3 L102.4 146.8 L104.1 147.1 L105.8 145.4 L107.4 143.3 L109.1 146.3 L110.8 147.8 L112.4 148.0 L114.1 147.3 L115.8 144.5 L117.5 139.0 L119.1 143.2 L120.8 141.9 L122.5 136.9 L124.1 140.8 L125.8 144.6 L127.5 143.8 L129.1 141.4 L130.8 138.4 L132.5 136.4 L134.1 137.9 L135.8 134.1 L137.5 127.8 L139.1 131.3 L140.8 126.2 L142.5 124.5 L144.1 127.2 L145.8 136.6 L147.5 138.5 L149.2 147.1 L150.8 152.8 L152.5 159.2 L154.2 140.2 L155.8 134.0 L157.5 123.6 L159.2 110.0 L160.8 103.7 L162.5 99.8 L164.2 93.3 L165.8 96.5 L167.5 105.3 L169.2 111.7 L170.8 115.7 L172.5 116.6 L174.2 117.8 L175.9 121.7 L177.5 132.9 L179.2 138.9 L180.9 137.6 L182.5 138.7 L184.2 141.8 L185.9 137.1 L187.5 134.9 L189.2 134.2 L190.9 130.7 L192.5 136.5 L194.2 137.4 L195.9 132.9 L197.5 132.7 L199.2 129.4 L200.9 132.5 L202.5 131.5 L204.2 131.1 L205.9 134.3 L207.6 131.3 L209.2 127.5 L210.9 129.0 L212.6 126.6 L214.2 128.0 L215.9 125.8 L217.6 128.5 L219.2 132.7 L220.9 135.0 L222.6 122.6 L224.2 116.9 L225.9 121.8 L227.6 126.8 L229.2 124.6 L230.9 119.6 L232.6 117.2 L234.3 119.7 L235.9 122.1 L237.6 119.9 L239.3 126.1 L240.9 126.0 L242.6 124.2 L244.3 128.5 L245.9 125.9 L247.6 123.1 L249.3 121.6 L250.9 121.8 L252.6 124.9 L254.3 126.1 L255.9 125.4 L257.6 127.3 L259.3 126.7 L260.9 127.7 L262.6 130.7 L264.3 127.9 L266.0 124.7 L267.6 127.2 L269.3 125.6 L271.0 122.1 L272.6 123.7 L274.3 119.7 L276.0 125.8 L277.6 130.4 L279.3 126.8 L281.0 127.6 L282.6 123.5 L284.3 128.6 L286.0 133.8 L287.6 127.6 L289.3 126.1 L291.0 125.3 L292.7 124.5 L294.3 125.0 L296.0 129.3 L297.7 125.0 L299.3 123.7 L301.0 126.6 L302.7 130.9 L304.3 128.1 L306.0 128.5"/><path style="--c:#6B8E23" d="M14.0 161.1 L15.7 145.5 L17.3 158.0 L19.0 164.5 L20.7 162.6 L22.3 171.2 L24.0 169.2 L25.7 162.3 L27.3 176.9 L29.0 172.7 L30.7 169.1 L32.4 171.6 L34.0 168.2 L35.7 164.5 L37.4 160.9 L39.0 170.6 L40.7 178.9 L42.4 172.2 L44.0 166.6 L45.7 170.6 L47.4 163.3 L49.0 169.3 L50.7 167.2 L52.4 170.8 L54.0 164.6 L55.7 164.8 L57.4 175.9 L59.1 165.5 L60.7 158.7 L62.4 162.1 L64.1 167.7 L65.7 185.2 L67.4 178.7 L69.1 166.8 L70.7 165.2 L72.4 167.3 L74.1 167.1 L75.7 174.4 L77.4 173.1 L79.1 179.2 L80.7 176.5 L82.4 176.6 L84.1 166.6 L85.7 171.4 L87.4 171.8 L89.1 172.0 L90.8 170.3 L92.4 170.8 L94.1 166.1 L95.8 168.5 L97.4 160.2 L99.1 154.3 L100.8 156.3 L102.4 163.0 L104.1 165.0 L105.8 166.2 L107.4 163.4 L109.1 166.4 L110.8 164.2 L112.4 165.0 L114.1 162.5 L115.8 156.9 L117.5 157.7 L119.1 163.3 L120.8 161.8 L122.5 157.6 L124.1 153.2 L125.8 150.0 L127.5 148.2 L129.1 144.0 L130.8 163.1 L132.5 172.4 L134.1 167.8 L135.8 163.7 L137.5 171.5 L139.1 158.9 L140.8 154.1 L142.5 147.2 L144.1 144.3 L145.8 146.6 L147.5 150.5 L149.2 149.8 L150.8 142.6 L152.5 126.6 L154.2 104.6 L155.8 86.4 L157.5 68.0 L159.2 48.5 L160.8 38.7 L162.5 27.5 L164.2 27.7 L165.8 31.3 L167.5 37.9 L169.2 51.3 L170.8 56.9 L172.5 67.0 L174.2 76.8 L175.9 78.2 L177.5 77.4 L179.2 74.7 L180.9 78.7 L182.5 77.1 L184.2 70.7 L185.9 70.8 L187.5 69.1 L189.2 67.8 L190.9 71.2 L192.5 78.7 L194.2 78.6 L195.9 83.9 L197.5 88.2 L199.2 89.6 L200.9 93.9 L202.5 93.8 L204.2 87.3 L205.9 93.6 L207.6 99.2 L209.2 101.2 L210.9 100.5 L212.6 107.2 L214.2 107.1 L215.9 106.2 L217.6 104.6 L219.2 96.8 L220.9 97.5 L222.6 99.8 L224.2 103.1 L225.9 110.7 L227.6 112.1 L229.2 110.9 L230.9 108.1 L232.6 107.0 L234.3 109.7 L235.9 99.5 L237.6 90.5 L239.3 88.6 L240.9 89.1 L242.6 91.8 L244.3 91.7 L245.9 95.4 L247.6 101.1 L249.3 99.5 L250.9 95.7 L252.6 93.0 L254.3 98.4 L255.9 97.5 L257.6 108.1 L259.3 112.6 L260.9 106.4 L262.6 106.3 L264.3 100.2 L266.0 94.2 L267.6 93.5 L269.3 95.8 L271.0 88.7 L272.6 88.9 L274.3 89.2 L276.0 83.4 L277.6 81.0 L279.3 81.7 L281.0 79.9 L282.6 82.1 L284.3 89.9 L286.0 84.1 L287.6 88.5 L289.3 85.5 L291.0 84.2 L292.7 85.9 L294.3 83.7 L296.0 78.3 L297.7 74.0 L299.3 77.1 L301.0 75.4 L302.7 78.2 L304.3 79.2 L306.0 80.6"/><path style="--c:#B8860B" d="M14.0 159.7 L15.7 148.7 L17.3 153.7 L19.0 160.6 L20.7 166.7 L22.3 167.1 L24.0 172.8 L25.7 171.0 L27.3 175.8 L29.0 173.3 L30.7 172.3 L32.4 169.9 L34.0 165.8 L35.7 162.7 L37.4 156.8 L39.0 168.6 L40.7 180.4 L42.4 173.4 L44.0 165.6 L45.7 172.2 L47.4 163.0 L49.0 169.2 L50.7 166.9 L52.4 167.6 L54.0 165.2 L55.7 166.3 L57.4 173.8 L59.1 169.7 L60.7 162.7 L62.4 165.5 L64.1 166.4 L65.7 175.0 L67.4 171.0 L69.1 166.1 L70.7 158.4 L72.4 160.8 L74.1 168.3 L75.7 160.8 L77.4 166.6 L79.1 165.9 L80.7 164.1 L82.4 164.5 L84.1 166.8 L85.7 167.6 L87.4 161.5 L89.1 166.4 L90.8 160.3 L92.4 162.8 L94.1 162.0 L95.8 156.4 L97.4 155.3 L99.1 154.7 L100.8 157.9 L102.4 155.9 L104.1 151.8 L105.8 153.0 L107.4 151.9 L109.1 155.5 L110.8 154.6 L112.4 153.1 L114.1 154.7 L115.8 153.1 L117.5 152.4 L119.1 153.3 L120.8 146.3 L122.5 141.4 L124.1 142.5 L125.8 141.0 L127.5 141.7 L129.1 146.4 L130.8 155.5 L132.5 164.8 L134.1 157.9 L135.8 159.1 L137.5 159.3 L139.1 159.7 L140.8 154.9 L142.5 145.1 L144.1 139.3 L145.8 143.3 L147.5 151.5 L149.2 146.9 L150.8 138.2 L152.5 124.3 L154.2 104.7 L155.8 83.6 L157.5 61.0 L159.2 43.4 L160.8 34.4 L162.5 26.1 L164.2 14.0 L165.8 28.0 L167.5 25.1 L169.2 37.8 L170.8 47.0 L172.5 64.0 L174.2 73.5 L175.9 71.4 L177.5 73.0 L179.2 79.2 L180.9 78.4 L182.5 74.1 L184.2 70.1 L185.9 69.6 L187.5 66.8 L189.2 59.7 L190.9 68.2 L192.5 72.3 L194.2 78.9 L195.9 78.7 L197.5 80.2 L199.2 81.2 L200.9 85.7 L202.5 86.6 L204.2 88.7 L205.9 84.8 L207.6 96.4 L209.2 93.7 L210.9 95.0 L212.6 105.5 L214.2 102.0 L215.9 106.7 L217.6 99.6 L219.2 96.8 L220.9 90.2 L222.6 93.3 L224.2 101.0 L225.9 107.7 L227.6 106.9 L229.2 100.1 L230.9 100.5 L232.6 96.3 L234.3 91.3 L235.9 92.1 L237.6 83.1 L239.3 77.2 L240.9 77.1 L242.6 78.1 L244.3 80.1 L245.9 88.7 L247.6 90.5 L249.3 93.0 L250.9 88.4 L252.6 87.7 L254.3 92.5 L255.9 93.9 L257.6 104.4 L259.3 103.8 L260.9 97.9 L262.6 100.3 L264.3 90.9 L266.0 84.2 L267.6 83.9 L269.3 85.1 L271.0 81.0 L272.6 81.2 L274.3 84.7 L276.0 79.6 L277.6 75.8 L279.3 76.0 L281.0 75.9 L282.6 79.3 L284.3 82.3 L286.0 82.2 L287.6 87.5 L289.3 82.3 L291.0 82.0 L292.7 81.4 L294.3 81.0 L296.0 76.1 L297.7 73.4 L299.3 69.0 L301.0 69.6 L302.7 73.5 L304.3 81.1 L306.0 79.2"/></svg>
+        <ul class="key"><li style="--c:var(--ink)">Sensors</li><li style="--c:#56B4E9">Shared PCA</li><li style="--c:#CC79A7">Trajectory metrics</li><li style="--c:#6B8E23">Aligned PCA</li><li style="--c:#B8860B">Aligned PCA + Trajectory metrics</li></ul>
+        <p class="shows">Balanced accuracy over time, three classes</p>
+        <span class="figure-label">Figure 3e–f</span>
+        <h3>Decoding across participants</h3>
+        <p>Leave-one-participant-out decoding of the image type from sensors, shared PCA, trajectory descriptors and aligned PCA.</p>
+        <span class="open">Open the report</span>
+    </a>
+      </div>
+    </div>
+  </section>
+
+  <section id="reports">
+    <div class="wide split">
+      <header>
+        <h2>All reports</h2>
+        <p>
+          Everything that was run, by dataset. Reports open in a viewer with a bar on top for
+          moving between analyses, contrasts and sensor selections. They are files of 5 to
+          20 MB, so give them a few seconds to load.
+        </p>
+      </header>
+      <div>
+  <div class="dataset" id="eegbci">
+    <h3>EEG: moving a hand, or imagining it</h3>
+    <p class="about">The PhysioNet EEG Motor Movement/Imagery dataset. 64-channel EEG from 106 people who opened and closed their left or right hand, or imagined doing so.</p>
+    <div class="rows">
+      <div class="row">
+        <h4>Trajectories</h4>
+        <div>
+          <p>The main analysis. One PCA space for all four conditions, how much variance it holds, and where the paths separate.</p>
+          <ul class="links">
+            <li><a href="view.html#eegbci/main/overview">Full report</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="row">
+        <h4>PCA next to nonlinear methods</h4>
+        <div>
+          <p>The same data through UMAP, PHATE and Isomap, to see what PCA keeps and what it misses.</p>
+          <ul class="links">
+            <li><a href="view.html#eegbci/nonlinear/overview">Full report</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="row">
+        <h4>Decoding across participants</h4>
+        <div>
+          <p>Train on some people, test on someone new. Raw sensors compared with PCA components aligned between participants.</p>
+          <ul class="links">
+            <li><a href="view.html#eegbci/decoding/overview">All contrasts together</a></li>
+            <li><a href="view.html#eegbci/decoding/4class_3_4_5_6">All four conditions</a></li>
+            <li><a href="view.html#eegbci/decoding/hands_exec_vs_hands_imag">Executed vs imagined</a></li>
+            <li><a href="view.html#eegbci/decoding/left_hand_exec_vs_right_hand_exec">Left vs right, executed</a></li>
+            <li><a href="view.html#eegbci/decoding/left_hand_imag_vs_right_hand_imag">Left vs right, imagined</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dataset" id="megfaces">
+    <h3>MEG: looking at faces</h3>
+    <p class="about">The Wakeman and Henson dataset (OpenNeuro ds000117). 306-channel MEG from 16 people who looked at famous faces, unfamiliar faces and scrambled images.</p>
+    <div class="picker">
+      <span class="ask">Sensors</span>
+      <button type="button" data-sensor="sensors_right_occipital" aria-pressed="true">Right occipital</button>
+      <button type="button" data-sensor="sensors_right_occipito_temporal" aria-pressed="false">Right occipito-temporal</button>
+      <button type="button" data-sensor="sensors_right_temporal" aria-pressed="false">Right temporal</button>
+      <button type="button" data-sensor="all_sensors" aria-pressed="false">All sensors</button>
+    </div>
+    <p class="picker-note">The paper uses the right-occipital sensors. These are groups of sensors by their position on the helmet. They are not source-localised brain regions.</p>
+    <div class="rows">
+      <div class="row">
+        <h4>Trajectories</h4>
+        <div>
+          <p>The three image types in one shared PCA space, with the faces vs scrambled and famous vs unfamiliar contrasts.</p>
+          <ul class="links">
+            <li><a href="view.html#megfaces/main/sensors_right_occipital" data-by-sensor="{&quot;all_sensors&quot;: &quot;view.html#megfaces/main/all_sensors&quot;, &quot;sensors_right_occipital&quot;: &quot;view.html#megfaces/main/sensors_right_occipital&quot;, &quot;sensors_right_occipito_temporal&quot;: &quot;view.html#megfaces/main/sensors_right_occipito_temporal&quot;, &quot;sensors_right_temporal&quot;: &quot;view.html#megfaces/main/sensors_right_temporal&quot;}">Full report</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="row">
+        <h4>Frequency bands</h4>
+        <div>
+          <p>The same analysis on alpha, beta and low-gamma (30 to 45 Hz) power instead of the broadband signal.</p>
+          <ul class="links">
+            <li><a href="view.html#megfaces/spectral/sensors_right_occipital" data-by-sensor="{&quot;all_sensors&quot;: &quot;view.html#megfaces/spectral/all_sensors&quot;, &quot;sensors_right_occipital&quot;: &quot;view.html#megfaces/spectral/sensors_right_occipital&quot;, &quot;sensors_right_occipito_temporal&quot;: &quot;view.html#megfaces/spectral/sensors_right_occipito_temporal&quot;, &quot;sensors_right_temporal&quot;: &quot;view.html#megfaces/spectral/sensors_right_temporal&quot;}">Full report</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="row">
+        <h4>Decoding across participants</h4>
+        <div>
+          <p>Train on 15 people, test on the 16th. Raw sensors compared with shared and aligned PCA components.</p>
+          <ul class="links">
+            <li><a href="view.html#megfaces/decoding/sensors_right_occipital" data-by-sensor="{&quot;all_sensors&quot;: &quot;view.html#megfaces/decoding/all_sensors&quot;, &quot;sensors_right_occipital&quot;: &quot;view.html#megfaces/decoding/sensors_right_occipital&quot;, &quot;sensors_right_occipito_temporal&quot;: &quot;view.html#megfaces/decoding/sensors_right_occipito_temporal&quot;, &quot;sensors_right_temporal&quot;: &quot;view.html#megfaces/decoding/sensors_right_temporal&quot;}">All contrasts together</a></li>
+            <li><a href="view.html#megfaces/decoding/best_models">Best model for each representation</a></li>
+            <li><a href="view.html#megfaces/decoding/3class_1_2_3/sensors_right_occipital" data-by-sensor="{&quot;all_sensors&quot;: &quot;view.html#megfaces/decoding/3class_1_2_3/all_sensors&quot;, &quot;sensors_right_occipital&quot;: &quot;view.html#megfaces/decoding/3class_1_2_3/sensors_right_occipital&quot;, &quot;sensors_right_occipito_temporal&quot;: &quot;view.html#megfaces/decoding/3class_1_2_3/sensors_right_occipito_temporal&quot;, &quot;sensors_right_temporal&quot;: &quot;view.html#megfaces/decoding/3class_1_2_3/sensors_right_temporal&quot;}">All three image types</a></li>
+            <li><a href="view.html#megfaces/decoding/famous_vs_scrambled/sensors_right_occipital" data-by-sensor="{&quot;all_sensors&quot;: &quot;view.html#megfaces/decoding/famous_vs_scrambled/all_sensors&quot;, &quot;sensors_right_occipital&quot;: &quot;view.html#megfaces/decoding/famous_vs_scrambled/sensors_right_occipital&quot;, &quot;sensors_right_occipito_temporal&quot;: &quot;view.html#megfaces/decoding/famous_vs_scrambled/sensors_right_occipito_temporal&quot;, &quot;sensors_right_temporal&quot;: &quot;view.html#megfaces/decoding/famous_vs_scrambled/sensors_right_temporal&quot;}">Famous vs scrambled</a></li>
+            <li><a href="view.html#megfaces/decoding/famous_vs_unfamiliar/sensors_right_occipital" data-by-sensor="{&quot;all_sensors&quot;: &quot;view.html#megfaces/decoding/famous_vs_unfamiliar/all_sensors&quot;, &quot;sensors_right_occipital&quot;: &quot;view.html#megfaces/decoding/famous_vs_unfamiliar/sensors_right_occipital&quot;, &quot;sensors_right_occipito_temporal&quot;: &quot;view.html#megfaces/decoding/famous_vs_unfamiliar/sensors_right_occipito_temporal&quot;, &quot;sensors_right_temporal&quot;: &quot;view.html#megfaces/decoding/famous_vs_unfamiliar/sensors_right_temporal&quot;}">Famous vs unfamiliar</a></li>
+            <li><a href="view.html#megfaces/decoding/unfamiliar_vs_scrambled/sensors_right_occipital" data-by-sensor="{&quot;all_sensors&quot;: &quot;view.html#megfaces/decoding/unfamiliar_vs_scrambled/all_sensors&quot;, &quot;sensors_right_occipital&quot;: &quot;view.html#megfaces/decoding/unfamiliar_vs_scrambled/sensors_right_occipital&quot;, &quot;sensors_right_occipito_temporal&quot;: &quot;view.html#megfaces/decoding/unfamiliar_vs_scrambled/sensors_right_occipito_temporal&quot;, &quot;sensors_right_temporal&quot;: &quot;view.html#megfaces/decoding/unfamiliar_vs_scrambled/sensors_right_temporal&quot;}">Unfamiliar vs scrambled</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="code">
+    <div class="wide split">
+      <header>
+        <h2>Code and tutorials</h2>
+        <p>
+          Everything is in one
+          <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">repository</a>.
+          <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg#readme">How to install and run it</a>
+        </p>
+      </header>
+      <div>
+        <div class="parts">
+          <div style="--c: var(--blue)">
+            <h3>Notebooks</h3>
+            <p>
+              Six tutorials that explain each step and the choices behind it. They run on a
+              few participants, so they finish on a laptop. Start here to learn the method.
+            </p>
+          </div>
+          <div style="--c: var(--orange)">
+            <h3>Scripts</h3>
+            <p>
+              One script per notebook, in <code>scripts/</code>. It runs the same workflow
+              on the full cohort and writes the tables, the figures and the report you see
+              on this site.
+            </p>
+          </div>
+          <div style="--c: var(--green)">
+            <h3>coco-pipe</h3>
+            <p>
+              The <a href="https://github.com/BabaSanfour/coco-pipe">library</a> underneath:
+              PCA and other reducers, alignment between participants, decoding, and the
+              report format. Use it on your own data.
+            </p>
+          </div>
+        </div>
+
+        <div class="table">
+        <table>
+          <thead><tr><th></th><th>Notebook</th><th>What it covers</th><th>In the paper</th></tr></thead>
+          <tbody>
+            <tr><td>1</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_main.ipynb">EEG: the core workflow</a></td>
+              <td>Fit PCA, plot trajectories for executed and imagined hand movements, and measure how they differ.</td>
+              <td>Figure 2</td></tr>
+            <tr><td>2</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_nonlinear.ipynb">EEG: PCA next to UMAP, PHATE and Isomap</a></td>
+              <td>The same data through three nonlinear methods.</td>
+              <td>Goes beyond it</td></tr>
+            <tr><td>3</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_decoding.ipynb">EEG: decoding across participants</a></td>
+              <td>Train on some people and test on someone new, from sensors and from aligned components.</td>
+              <td>Follows Figure 2</td></tr>
+            <tr><td>4</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_main.ipynb">MEG: faces in one shared space</a></td>
+              <td>Famous, unfamiliar and scrambled faces in a single PCA space.</td>
+              <td>Figure 3a–b</td></tr>
+            <tr><td>5</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_spectral_envelopes.ipynb">MEG: frequency bands</a></td>
+              <td>Trajectories of alpha power, extended to beta and low gamma.</td>
+              <td>Figure 3c–d</td></tr>
+            <tr><td>6</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_decoding.ipynb">MEG: decoding across participants</a></td>
+              <td>Cross-participant decoding and alignment.</td>
+              <td>Figure 3e–f</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cite">
+    <div class="wide split">
+      <header><h2>Cite</h2></header>
+      <div class="cite">
+        <button type="button" class="copy">Copy</button>
+<pre>@article{hadid2026signals,
+  title   = {From Signals to Trajectories: A Primer on Low-Dimensional
+             Dynamics in Human EEG and MEG},
+  author  = {Hadid, Vanessa and Abdelhedi, Hamza and Pascarella, Annalisa
+             and Solla, Sara A. and Cisek, Paul and Jerbi, Karim},
+  journal = {arXiv preprint arXiv:2609.32315},
+  year    = {2026}
+}</pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="stripe"></div>
+  <div class="wide">
+    <p>
+      Data: <a href="https://physionet.org/content/eegmmidb/1.0.0/">PhysioNet EEG Motor Movement/Imagery Database</a>
+      and the <a href="https://openneuro.org/datasets/ds000117">Wakeman–Henson multimodal dataset (OpenNeuro ds000117)</a>.
+      Neither is redistributed here.
+    </p>
+    <p>Last updated 1 October 2026.</p>
+  </div>
+</footer>
+
+<script>
+  // Light / dark switch. The choice is remembered and shared with the report viewer.
+  document.querySelectorAll('.theme').forEach(button => {
+    const root = document.documentElement;
+    const label = () => { button.textContent = root.dataset.theme === 'dark' ? 'Light' : 'Dark'; };
+    button.addEventListener('click', () => {
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('theme', root.dataset.theme); } catch (error) {}
+      label();
+    });
+    label();
+  });
+
+  // Sensor picker: point the links of a dataset at the chosen sensor selection.
+  document.querySelectorAll('.picker').forEach(picker => {
+    const links = picker.closest('.dataset').querySelectorAll('a[data-by-sensor]');
+    picker.querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
+      picker.querySelectorAll('button').forEach(other =>
+        other.setAttribute('aria-pressed', other === button));
+      links.forEach(link => {
+        const href = JSON.parse(link.dataset.bySensor)[button.dataset.sensor];
+        link.parentElement.hidden = !href;
+        if (href) link.href = href;
+      });
+    }));
+  });
+
+  // Copy the citation.
+  document.querySelectorAll('.copy').forEach(button => button.addEventListener('click', () => {
+    navigator.clipboard.writeText(button.parentElement.querySelector('pre').textContent)
+      .then(() => { button.textContent = 'Copied'; setTimeout(() => { button.textContent = 'Copy'; }, 1500); });
+  }));
+
+  // Trajectory player: draw each path up to the chosen time.
+  document.querySelectorAll('.player').forEach(player => {
+    const data = JSON.parse(player.querySelector('.player-data').textContent);
+    const lines = player.querySelectorAll('path.live');
+    const dots = player.querySelectorAll('circle');
+    const slider = player.querySelector('input');
+    const readout = player.querySelector('output');
+    const button = player.querySelector('.play');
+    const last = data.ms.length - 1;
+    let frame = null;
+
+    function show(index) {
+      data.paths.forEach((points, k) => {
+        lines[k].setAttribute('d', 'M' + points.slice(0, index + 1).join(' L'));
+        const [x, y] = points[index].split(' ');
+        dots[k].setAttribute('cx', x);
+        dots[k].setAttribute('cy', y);
+      });
+      const ms = data.ms[index];
+      readout.textContent = ms < 0 ? `${-ms} ms before the image` : `${ms} ms after the image appears`;
+      slider.value = index;
+    }
+    function stop() {
+      cancelAnimationFrame(frame);
+      frame = null;
+      button.textContent = 'Play';
+    }
+    function play() {
+      const began = performance.now();
+      button.textContent = 'Pause';
+      const step = now => {
+        const index = Math.min(last, Math.round((now - began) / 9000 * last));
+        show(index);
+        frame = index < last ? requestAnimationFrame(step) : (stop(), null);
+      };
+      frame = requestAnimationFrame(step);
+    }
+
+    button.addEventListener('click', () => frame ? stop() : play());
+    slider.addEventListener('input', () => { stop(); show(Number(slider.value)); });
+    show(last);
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) play();
+  });
+</script>
+</body>
+</html>

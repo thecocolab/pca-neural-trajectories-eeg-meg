@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
+<script>
+  // Light or dark: the saved choice, or else what the system prefers.
+  (function () {
+    let theme = null;
+    try { theme = localStorage.getItem('theme'); } catch (error) {}
+    if (theme !== 'light' && theme !== 'dark')
+      theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
+<style>
+  :root {
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --bg: #ffffff; --ink: #17202b; --soft: #5b6775; --line: #dfe4ea; --edge: #b8c2ce; --wait: #f4f6f8;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a0f15; --ink: #e9eef4; --soft: #98a7b8; --line: #232f3e; --edge: #4a5b70; --wait: #0f161f;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--ink); font: 15px/1.4 var(--sans); }
+
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem 1.1rem; padding: .5rem 1rem; background: var(--bg); }
+  .home { font: 600 1.02rem var(--serif); color: var(--ink); text-decoration: none; margin-right: .4rem; white-space: nowrap; }
+  .home:hover { text-decoration: underline; }
+  .group { display: flex; flex-wrap: wrap; gap: .25rem; }
+  button {
+    padding: .22rem .75rem; border: 1px solid var(--edge); border-radius: 6px;
+    background: transparent; color: var(--ink); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--ink); }
+  .group button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); font-weight: 600; }
+  .divider { width: 1px; align-self: stretch; background: var(--line); }
+  label { display: flex; align-items: center; gap: .4rem; color: var(--soft); }
+  select {
+    max-width: 17rem; padding: .22rem .5rem; border: 1px solid var(--edge); border-radius: 6px;
+    background: var(--bg); color: var(--ink); font: inherit;
+  }
+  label[hidden] { display: none; }
+  .end { margin-left: auto; display: flex; align-items: center; gap: .9rem; }
+  .alone { color: var(--soft); white-space: nowrap; }
+  .alone:hover { color: var(--ink); }
+  .stripe { height: 3px; background: linear-gradient(90deg, #0072b2 0 33.3%, #d55e00 33.3% 66.6%, #009e73 66.6%); }
+
+  .stage { position: relative; flex: 1; min-height: 0; }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--wait); color: var(--soft); text-align: center; padding: 1rem; }
+  .loading[hidden] { display: none; }
+  @media (max-width: 700px) { .divider { display: none; } .end { margin-left: 0; } }
+</style>
+</head>
+<body>
+
+<nav class="bar" aria-label="Reports">
+  <a class="home" href="index.html">&larr; Home</a>
+  <div class="group" id="datasets"></div>
+  <span class="divider"></span>
+  <div class="group" id="analyses"></div>
+  <label id="report-label">Report <select id="reports"></select></label>
+  <label id="sensor-label">Sensors <select id="sensors"></select></label>
+  <span class="end">
+    <a class="alone" id="alone" target="_blank" rel="noopener">Open on its own &nearr;</a>
+    <button type="button" class="theme" aria-label="Switch between light and dark background"></button>
+  </span>
+</nav>
+<div class="stripe"></div>
+
+<div class="stage">
+  <p class="loading">Loading the report. They are large files, so this can take a few seconds.</p>
+</div>
+
+<script>
+  // Filled in by build.py: datasets > analyses > reports > one file per sensor selection.
+  const SITE = [{"name": "EEG", "sensors": [], "analyses": [{"name": "Trajectories", "reports": [{"name": "Full report", "routes": {"": "eegbci/main/overview"}}]}, {"name": "Nonlinear", "reports": [{"name": "Full report", "routes": {"": "eegbci/nonlinear/overview"}}]}, {"name": "Decoding", "reports": [{"name": "All contrasts together", "routes": {"": "eegbci/decoding/overview"}}, {"name": "All four conditions", "routes": {"": "eegbci/decoding/4class_3_4_5_6"}}, {"name": "Executed vs imagined", "routes": {"": "eegbci/decoding/hands_exec_vs_hands_imag"}}, {"name": "Left vs right, executed", "routes": {"": "eegbci/decoding/left_hand_exec_vs_right_hand_exec"}}, {"name": "Left vs right, imagined", "routes": {"": "eegbci/decoding/left_hand_imag_vs_right_hand_imag"}}]}]}, {"name": "MEG", "sensors": [{"key": "sensors_right_occipital", "name": "Right occipital"}, {"key": "sensors_right_occipito_temporal", "name": "Right occipito-temporal"}, {"key": "sensors_right_temporal", "name": "Right temporal"}, {"key": "all_sensors", "name": "All sensors"}], "analyses": [{"name": "Trajectories", "reports": [{"name": "Full report", "routes": {"all_sensors": "megfaces/main/all_sensors", "sensors_right_occipital": "megfaces/main/sensors_right_occipital", "sensors_right_occipito_temporal": "megfaces/main/sensors_right_occipito_temporal", "sensors_right_temporal": "megfaces/main/sensors_right_temporal"}}]}, {"name": "Frequency bands", "reports": [{"name": "Full report", "routes": {"all_sensors": "megfaces/spectral/all_sensors", "sensors_right_occipital": "megfaces/spectral/sensors_right_occipital", "sensors_right_occipito_temporal": "megfaces/spectral/sensors_right_occipito_temporal", "sensors_right_temporal": "megfaces/spectral/sensors_right_temporal"}}]}, {"name": "Decoding", "reports": [{"name": "All contrasts together", "routes": {"all_sensors": "megfaces/decoding/all_sensors", "sensors_right_occipital": "megfaces/decoding/sensors_right_occipital", "sensors_right_occipito_temporal": "megfaces/decoding/sensors_right_occipito_temporal", "sensors_right_temporal": "megfaces/decoding/sensors_right_temporal"}}, {"name": "Best model for each representation", "routes": {"": "megfaces/decoding/best_models"}}, {"name": "All three image types", "routes": {"all_sensors": "megfaces/decoding/3class_1_2_3/all_sensors", "sensors_right_occipital": "megfaces/decoding/3class_1_2_3/sensors_right_occipital", "sensors_right_occipito_temporal": "megfaces/decoding/3class_1_2_3/sensors_right_occipito_temporal", "sensors_right_temporal": "megfaces/decoding/3class_1_2_3/sensors_right_temporal"}}, {"name": "Famous vs scrambled", "routes": {"all_sensors": "megfaces/decoding/famous_vs_scrambled/all_sensors", "sensors_right_occipital": "megfaces/decoding/famous_vs_scrambled/sensors_right_occipital", "sensors_right_occipito_temporal": "megfaces/decoding/famous_vs_scrambled/sensors_right_occipito_temporal", "sensors_right_temporal": "megfaces/decoding/famous_vs_scrambled/sensors_right_temporal"}}, {"name": "Famous vs unfamiliar", "routes": {"all_sensors": "megfaces/decoding/famous_vs_unfamiliar/all_sensors", "sensors_right_occipital": "megfaces/decoding/famous_vs_unfamiliar/sensors_right_occipital", "sensors_right_occipito_temporal": "megfaces/decoding/famous_vs_unfamiliar/sensors_right_occipito_temporal", "sensors_right_temporal": "megfaces/decoding/famous_vs_unfamiliar/sensors_right_temporal"}}, {"name": "Unfamiliar vs scrambled", "routes": {"all_sensors": "megfaces/decoding/unfamiliar_vs_scrambled/all_sensors", "sensors_right_occipital": "megfaces/decoding/unfamiliar_vs_scrambled/sensors_right_occipital", "sensors_right_occipito_temporal": "megfaces/decoding/unfamiliar_vs_scrambled/sensors_right_occipito_temporal", "sensors_right_temporal": "megfaces/decoding/unfamiliar_vs_scrambled/sensors_right_temporal"}}]}]}];
+
+  const $ = id => document.getElementById(id);
+  const stage = document.querySelector('.stage');
+  const loading = document.querySelector('.loading');
+  let sensorChoice = null;   // remembered while moving between analyses
+
+  // Which dataset / analysis / report / sensor a route belongs to.
+  function locate(route) {
+    for (const [d, dataset] of SITE.entries())
+      for (const [a, analysis] of dataset.analyses.entries())
+        for (const [r, report] of analysis.reports.entries())
+          for (const [sensor, value] of Object.entries(report.routes))
+            if (value === route) return { d, a, r, sensor };
+    return null;
+  }
+
+  // The file of a report for the preferred sensor selection, or the nearest there is.
+  function routeOf(d, a, r) {
+    const routes = SITE[d].analyses[a].reports[r].routes;
+    if ('' in routes) return routes[''];
+    if (sensorChoice in routes) return routes[sensorChoice];
+    const first = SITE[d].sensors.find(sensor => sensor.key in routes);
+    return routes[first ? first.key : Object.keys(routes)[0]];
+  }
+
+  function go(d, a, r) { location.hash = routeOf(d, a, r); }
+
+  function buttons(container, names, current, onPick) {
+    container.replaceChildren(...names.map((name, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = name;
+      button.setAttribute('aria-pressed', index === current);
+      button.addEventListener('click', () => onPick(index));
+      return button;
+    }));
+  }
+
+  function options(select, entries, current) {
+    select.replaceChildren(...entries.map(([value, name]) => new Option(name, value)));
+    select.value = current;
+  }
+
+  function show() {
+    const route = decodeURIComponent(location.hash.slice(1));
+    const at = locate(route);
+    if (!at) { location.replace('#' + routeOf(0, 0, 0)); return; }
+    const dataset = SITE[at.d], analysis = dataset.analyses[at.a], report = analysis.reports[at.r];
+    if (at.sensor) sensorChoice = at.sensor;
+
+    buttons($('datasets'), SITE.map(item => item.name), at.d, d => go(d, 0, 0));
+    buttons($('analyses'), dataset.analyses.map(item => item.name), at.a, a => go(at.d, a, 0));
+
+    $('report-label').hidden = analysis.reports.length < 2;
+    options($('reports'), analysis.reports.map((item, index) => [index, item.name]), at.r);
+    $('reports').onchange = event => go(at.d, at.a, Number(event.target.value));
+
+    const sensors = dataset.sensors.filter(sensor => sensor.key in report.routes);
+    $('sensor-label').hidden = sensors.length < 2;
+    options($('sensors'), sensors.map(sensor => [sensor.key, sensor.name]), at.sensor);
+    $('sensors').onchange = event => {
+      sensorChoice = event.target.value;
+      go(at.d, at.a, at.r);
+    };
+
+    const file = 'reports/' + route + '.html';
+    $('alone').href = file;
+    document.title = `${analysis.name} (${dataset.name})`;
+
+    // A fresh frame each time, so moving between reports does not pile up history.
+    const frame = document.createElement('iframe');
+    frame.title = `${analysis.name}, ${report.name}`;
+    frame.addEventListener('load', () => { loading.hidden = true; });
+    loading.hidden = false;
+    stage.querySelector('iframe')?.remove();
+    frame.src = file;
+    stage.prepend(frame);
+  }
+
+  // Light / dark switch for this bar. The report inside has its own switch.
+  document.querySelectorAll('.theme').forEach(button => {
+    const root = document.documentElement;
+    const label = () => { button.textContent = root.dataset.theme === 'dark' ? 'Light' : 'Dark'; };
+    button.addEventListener('click', () => {
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('theme', root.dataset.theme); } catch (error) {}
+      label();
+    });
+    label();
+  });
+
+  addEventListener('hashchange', show);
+  show();
+</script>
+</body>
+</html>
