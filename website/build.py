@@ -6,7 +6,7 @@ path that spells out its analysis, and linked from a generated ``index.html``.
 
     python website/build.py                    # incremental copy + regenerate index
     python website/build.py --clean            # drop reports/ first
-    python website/build.py --source outputs/v3
+    python website/build.py --source outputs/release
 
 Page design lives in ``template.html``; what appears where is the configuration
 below. Adding an analysis means adding one line to ANALYSES (plus a GROUPS entry
@@ -52,8 +52,9 @@ DATASETS = [
         "tagline": "Wakeman–Henson ds000117, 16 participants",
         "blurb": (
             "The Wakeman–Henson multimodal face dataset (OpenNeuro ds000117): 306-channel MEG "
-            "recorded while participants viewed famous, unfamiliar, and scrambled faces. Each "
-            "analysis is repeated over four sensor selections, which are helmet-position subsets "
+            "recorded while participants viewed famous, unfamiliar, and scrambled faces. The "
+            "right-occipital selection is the main analysis and is listed first in every group; "
+            "the other sensor selections are there to explore. All are helmet-position subsets "
             "rather than source-localized regions."
         ),
     },
@@ -84,6 +85,8 @@ GROUPS = [
 # Path segments that deserve a nicer label than the automatic prettifier gives.
 LABELS = {
     "all_sensors": "All sensors",
+    "best_models": "Best model per representation",
+    "sensors_occipital": "Occipital",
     "sensors_right_occipital": "Right occipital",
     "sensors_right_temporal": "Right temporal",
     "sensors_right_occipito_temporal": "Right occipito-temporal",
@@ -98,8 +101,8 @@ LABELS = {
 }
 
 # Sort earlier when a segment appears; anything unlisted sorts alphabetically after.
-PRIORITY = ["all_sensors", "sensors_right_occipito_temporal",
-            "sensors_right_occipital", "sensors_right_temporal"]
+PRIORITY = ["best_models", "sensors_right_occipital", "all_sensors",
+            "sensors_right_occipito_temporal", "sensors_right_temporal"]
 
 # Label for a report sitting at the root of its analysis directory, by group.
 ROOT_LABELS = {"decoding": "All contrasts (full sweep)"}
@@ -127,10 +130,11 @@ def human_size(num_bytes: int) -> str:
 
 
 def sort_key(segments: list[str]) -> tuple:
-    """Root reports first, then priority segments, then alphabetical."""
-    head = segments[0] if segments else ""
-    rank = PRIORITY.index(head) if head in PRIORITY else len(PRIORITY)
-    return (len(segments), rank, segments)
+    """Root reports first; within a parent (e.g. one contrast), priority segments
+    such as the main sensor selection first, then alphabetical."""
+    last = segments[-1] if segments else ""
+    rank = PRIORITY.index(last) if last in PRIORITY else len(PRIORITY)
+    return (len(segments), segments[:-1], rank, segments)
 
 
 def collect(source: Path) -> dict[tuple[str, str], list[dict]]:
@@ -248,8 +252,8 @@ def main() -> None:
     here = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--source", type=Path, default=here.parent / "outputs" / "v2",
-                        help="analysis output tree to scan (default: outputs/v2)")
+    parser.add_argument("--source", type=Path, default=here.parent / "outputs" / "release",
+                        help="analysis output tree to scan (default: outputs/release)")
     parser.add_argument("--clean", action="store_true",
                         help="delete website/reports/ before copying")
     args = parser.parse_args()

@@ -66,7 +66,9 @@ def facet_figures(
         for trace in source.data:
             copied = copy.deepcopy(trace)
             name = getattr(copied, "name", None)
-            if name:
+            # Traces the source figure hid (e.g. thin per-participant lines)
+            # stay out of the legend; only visible entries are de-duplicated.
+            if name and trace.showlegend is not False:
                 copied.legendgroup = name
                 copied.showlegend = name not in legend_seen
                 legend_seen.add(name)

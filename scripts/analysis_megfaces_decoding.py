@@ -26,7 +26,8 @@ analysis arrays, provenance manifests, and a fully self-contained HTML report.
 
 Examples
 --------
-python scripts/analysis_megfaces_decoding.py --contrasts  # the four default contrasts
+python scripts/analysis_megfaces_decoding.py  # best models, then the four contrasts
+python scripts/analysis_megfaces_decoding.py --best-models-only
 python scripts/analysis_megfaces_decoding.py --contrasts 1-3 2-3 1-2 1-2-3
 python scripts/analysis_megfaces_decoding.py --report-only  # combine finished runs
 """
@@ -92,8 +93,9 @@ from pca_neural_trajectories.wakeman_henson import (
 )
 
 SEED = 42
+DEFAULT_SENSOR_SET = "sensors_right_occipital"
 DEFAULT_CONDITIONS = (1, 3)
-# The four contrasts FINDINGS.md reports for MEG Faces: three binaries plus the
+# The four contrasts reported for MEG Faces: three binaries plus the
 # three-class target.
 DEFAULT_CONTRASTS: tuple[tuple[int, ...], ...] = ((1, 3), (2, 3), (1, 2), (1, 2, 3))
 # Faceted one panel per contrast in the sweep report. `fold_heatmaps` is
@@ -252,6 +254,19 @@ def _stack(*elements: Element) -> ContainerElement:
     return box
 
 
+def _within_subject_ceiling(scores: pd.DataFrame) -> float:
+    """Peak of the across-participant mean within-participant curve.
+
+    This is the curve drawn in the ceiling figure, and it is a group-mean curve
+    like the LOSO peaks it is compared with. The best single participant's own
+    peak would be a maximum over participants of a maximum over latencies - an
+    extreme value, not a ceiling. In a sweep the highest contrast is reported,
+    matching the other headline peaks.
+    """
+    keys = ["Contrast", "Time"] if "Contrast" in scores else ["Time"]
+    return float(scores.groupby(keys)["Mean"].mean().max())
+
+
 def _headline_metrics(
     tables: dict[str, pd.DataFrame],
     context: dict[str, object],
@@ -272,7 +287,7 @@ def _headline_metrics(
     metrics["Best peak BA"] = f"{best['peak_balanced_accuracy']:.3f}"
     metrics["Sensors peak BA"] = f"{sensors:.3f}"
     metrics["Within-participant ceiling"] = (
-        f"{tables['within_subject_peaks']['peak_balanced_accuracy'].max():.3f}"
+        f"{_within_subject_ceiling(tables['within_subject_scores']):.3f}"
     )
     metrics["Significant comparisons"] = f"{int(significant.sum())}/{len(significant)}"
     return metrics
@@ -677,8 +692,7 @@ def build_decoding_report(
             "are randomly swapped, and the observed balanced-accuracy difference "
             "is compared to that null. `max_stat` multiple-comparison correction "
             "takes the maximum of the null distribution across all latencies, so "
-            "a single corrected p-value protects the whole time course — the "
-            "same logic as FINDINGS.md's original validation. This test costs no "
+            "a single corrected p-value protects the whole time course. This test costs no "
             "extra model fits: it reuses the already-fitted predictions above."
         )
     )
@@ -718,7 +732,7 @@ def build_decoding_report(
     step11.add_element(
         MarkdownElement("Three checks bound what any alignment gain can mean.")
     )
-    ceiling = tables["within_subject_peaks"]["peak_balanced_accuracy"].max()
+    ceiling = _within_subject_ceiling(tables["within_subject_scores"])
     loso_sensors = tables["peak_summary"].loc[
         tables["peak_summary"]["Representation"] == "Sensors", "peak_balanced_accuracy"
     ].max()
@@ -843,7 +857,7 @@ def run_decoding_analysis(
     within_subject_splits: int = 5,
     n_jobs: int = 1,
     seed: int = SEED,
-    sensor_set: str = "all_sensors",
+    sensor_set: str = DEFAULT_SENSOR_SET,
     conditions: tuple[int, ...] = DEFAULT_CONDITIONS,
 ) -> dict[str, object]:
     """Run the notebook-equivalent MEG decoding analysis and save every output.
@@ -1094,6 +1108,11 @@ def run_decoding_analysis(
                 f"({n_permutations} shuffles, max-stat corrected)"
             ),
         )
+        significance_figures[figure_key].update_xaxes(title_text="time from image onset (s)")
+        significance_figures[figure_key].update_yaxes(
+            title_text="balanced accuracy difference"
+        )
+        significance_figures[figure_key].update_layout(margin_l=80)
     significance_assessment = pd.concat(significance_frames, ignore_index=True)
     significance_summary = (
         significance_assessment.loc[
@@ -1577,7 +1596,7 @@ def run_contrast_sweep(
     *,
     contrasts: Sequence[Sequence[int]] = DEFAULT_CONTRASTS,
     output: Path,
-    sensor_set: str = "all_sensors",
+    sensor_set: str = DEFAULT_SENSOR_SET,
     report_only: bool = False,
     resume: bool = True,
     **analysis_kwargs: object,
@@ -1691,7 +1710,9 @@ def run_contrast_sweep(
         sweep_figures[name] = facet_figures(
             ordered,
             n_cols=2,
-            title=(per_contrast[labels[0]].layout.title.text or name),
+            # Panel titles lead with their own contrast ("A versus B: ...");
+            # the grid shows every contrast, so keep only the shared part.
+            title=(per_contrast[labels[0]].layout.title.text or name).split(": ")[-1],
             row_height=400,
             # Chance level differs between binary and multiclass panels, so a
             # shared y-axis would misplace the reference line.
@@ -1788,9 +1809,359 @@ def run_contrast_sweep(
     return {"manifest": manifest, "tables": sweep_tables, "figures": sweep_figures}
 
 
+# --- Best model per representation -------------------------------------------
+# Two targets, each decoded from the right-occipital sensors with the best
+# configuration found for five representations in an exploratory search over
+# component counts, classifiers and trajectory-descriptor subsets. The search
+# chose the same hyperparameters in every outer fold, so they are fixed here and
+# no nested search is run.
+BEST_MODEL_CONTRASTS: dict[str, tuple[int, ...]] = {
+    "3class": (1, 2, 3),
+    "unfamiliar_vs_scrambled": (2, 3),
+}
+BEST_MODEL_TITLES = {
+    "3class": "3-class: Famous vs. Unfamiliar vs. Scrambled",
+    "unfamiliar_vs_scrambled": "2-class: Unfamiliar vs. Scrambled",
+}
+# Peaks are read within this interval, which is also the plotted one.
+BEST_MODEL_WINDOW = (-0.2, 0.5)
+BEST_MODEL_LABELS = {
+    "sensors": "Sensors (raw, right-occ.)",
+    "shared_pca": "Shared PCA",
+    "metrics_only": "Trajectory metrics",
+    "aligned_pca": "Aligned PCA",
+    "aligned_plus_metrics": "Aligned PCA + Trajectory metrics",
+}
+BEST_MODEL_COLORS = {
+    "sensors": "#000000",
+    "shared_pca": "#56B4E9",
+    "metrics_only": "#CC79A7",
+    "aligned_pca": "#6B8E23",
+    "aligned_plus_metrics": "#B8860B",
+}
+_LR = ("LogisticRegression", {"class_weight": "balanced", "max_iter": 2000})
+_LDA = ("LinearDiscriminantAnalysis", {"solver": "lsqr", "shrinkage": None})
+_LINEAR_SVC = ("LinearSVC", {"class_weight": "balanced", "max_iter": 5000})
+# representation: "sensors"; "reducer" (fold-local PCA refit at every latency);
+# "shared" (pooled training template); "aligned" (Procrustes-aligned per-participant
+# PCA). ``metrics`` are trajectory-geometry descriptors of the aligned path;
+# ``metrics_only`` drops the PC scores and keeps only those descriptors.
+BEST_MODELS: dict[str, dict[str, dict[str, object]]] = {
+    "3class": {
+        "sensors": {"representation": "sensors", "estimator": _LR},
+        "shared_pca": {
+            "representation": "shared",
+            "n_components": 15,
+            "estimator": _LINEAR_SVC,
+            "params": {"C": 0.0001},
+        },
+        "aligned_pca": {"representation": "aligned", "n_components": 22, "estimator": _LDA},
+        "metrics_only": {
+            "representation": "aligned",
+            "n_components": 22,
+            "estimator": _LDA,
+            "metrics": ("auc_speed", "distance_from_center", "path_length"),
+            "metrics_only": True,
+        },
+        "aligned_plus_metrics": {
+            "representation": "aligned",
+            "n_components": 22,
+            "estimator": _LDA,
+            "metrics": ("path_length", "displacement", "auc_speed"),
+        },
+    },
+    "unfamiliar_vs_scrambled": {
+        "sensors": {"representation": "sensors", "estimator": _LR},
+        "shared_pca": {"representation": "reducer", "n_components": 9, "estimator": _LDA},
+        "aligned_pca": {
+            "representation": "aligned",
+            "n_components": 22,
+            "estimator": _LR,
+            "params": {"C": 0.0001},
+        },
+        "metrics_only": {
+            "representation": "aligned",
+            "n_components": 22,
+            "estimator": _LDA,
+            "metrics": ("speed", "distance_from_center", "turning_angle", "auc_speed"),
+            "metrics_only": True,
+        },
+        "aligned_plus_metrics": {
+            "representation": "aligned",
+            "n_components": 22,
+            "estimator": _LR,
+            "params": {"C": 0.0001},
+            "metrics": ("jerk", "path_length", "auc_speed"),
+        },
+    },
+}
+
+
+def _describe_best_model(spec: dict[str, object]) -> str:
+    estimator, _ = spec["estimator"]
+    parts = [str(spec["representation"])]
+    if spec.get("n_components"):
+        parts.append(f"{spec['n_components']}C")
+    if spec.get("metrics"):
+        prefix = "only " if spec.get("metrics_only") else "+ "
+        parts.append(prefix + ", ".join(spec["metrics"]))
+    params = ", ".join(f"{key}={value}" for key, value in spec.get("params", {}).items())
+    return f"{' '.join(parts)} · {estimator}" + (f" ({params})" if params else "")
+
+
+def _best_model_config(spec: dict[str, object], *, seed: int, n_jobs: int) -> ExperimentConfig:
+    """The experiment for one representation's best model (fixed hyperparameters)."""
+    estimator, base_params = spec["estimator"]
+    config = ExperimentConfig(
+        task="classification",
+        models={
+            estimator: TemporalDecoderConfig(
+                wrapper="sliding",
+                base=ClassicalModelConfig(
+                    estimator=estimator, params={**base_params, **spec.get("params", {})}
+                ),
+                n_jobs=1,
+                verbose=False,
+            )
+        },
+        metrics=["balanced_accuracy"],
+        cv=CVConfig(strategy="leave_one_group_out", shuffle=False),
+        use_scaler=True,
+        random_state=seed,
+        n_jobs=n_jobs,
+        verbose=False,
+    )
+    metrics = tuple(spec.get("metrics", ()))
+    if spec["representation"] == "reducer":
+        config.reducer = ReducerConfig(enabled=True, n_components=spec["n_components"])
+    elif spec["representation"] in {"shared", "aligned"}:
+        config.temporal_alignment = TemporalAlignmentConfig(
+            enabled=True,
+            n_components=spec["n_components"],
+            adaptation="transductive",
+            use_shared_basis=spec["representation"] == "shared",
+            augment=("trajectory",) if metrics else (),
+            augment_only=bool(spec.get("metrics_only", False)),
+            trajectory_metrics=metrics,
+        )
+    return config
+
+
+def _load_best_model_contrast(
+    derivatives_root: Path, subjects: list[str], conditions: tuple[int, ...]
+) -> dict[str, np.ndarray]:
+    """Right-occipital epochs for one target, classes in ``conditions`` order."""
+    container = _load_wakeman_henson_container(
+        derivatives_root,
+        subjects=subjects,
+        conditions=conditions,
+        sensor_set=DEFAULT_SENSOR_SET,
+    )
+    class_index = {condition_id: index for index, condition_id in enumerate(conditions)}
+    trial_ids = (
+        np.asarray(container.ids).astype(str)
+        if container.ids is not None
+        else np.asarray([f"trial-{index}" for index in range(len(container.X))])
+    )
+    return {
+        "X": np.asarray(container.X, dtype=np.float32),
+        "y": np.array([class_index[value] for value in np.asarray(container.y, dtype=int)]),
+        "times": np.asarray(container.coords["time"], dtype=float),
+        "subject_ids": np.asarray(container.coords["subject"]).astype(str),
+        "trial_ids": trial_ids,
+    }
+
+
+def _best_model_peaks(tables: dict[str, pd.DataFrame], contrast: str) -> pd.DataFrame:
+    """Peak balanced accuracy per representation within ``BEST_MODEL_WINDOW``."""
+    rows = []
+    for curve, table in tables.items():
+        shown = table[table["Time"].between(*BEST_MODEL_WINDOW)]
+        peak = shown.loc[shown["Mean"].idxmax()]
+        rows.append(
+            {
+                "contrast": contrast,
+                "representation": BEST_MODEL_LABELS[curve],
+                "model": _describe_best_model(BEST_MODELS[contrast][curve]),
+                "peak_time_s": float(peak["Time"]),
+                "peak_balanced_accuracy": float(peak["Mean"]),
+                "fold_std_at_peak": float(peak["Std"]),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("peak_balanced_accuracy", ascending=False)
+
+
+def _plot_best_models(tables: dict[str, pd.DataFrame], contrast: str) -> go.Figure:
+    """Five curves with their peaks marked, over ``BEST_MODEL_WINDOW``."""
+    figure = go.Figure()
+    for curve, label in BEST_MODEL_LABELS.items():
+        shown = tables[curve][tables[curve]["Time"].between(*BEST_MODEL_WINDOW)]
+        peak = shown.loc[shown["Mean"].idxmax()]
+        color = BEST_MODEL_COLORS[curve]
+        figure.add_trace(
+            go.Scatter(
+                x=shown["Time"],
+                y=shown["Mean"],
+                mode="lines",
+                name=f"{label} (peak {peak['Mean']:.3f})",
+                legendgroup=curve,
+                line={"color": color, "width": 2.5},
+            )
+        )
+        figure.add_trace(
+            go.Scatter(
+                x=[peak["Time"]],
+                y=[peak["Mean"]],
+                mode="markers",
+                legendgroup=curve,
+                showlegend=False,
+                marker={"color": color, "size": 9, "line": {"color": "white", "width": 1}},
+                hovertemplate="peak %{y:.3f} at %{x:.3f} s<extra></extra>",
+            )
+        )
+    figure.add_hline(
+        y=1.0 / len(BEST_MODEL_CONTRASTS[contrast]),
+        line={"color": "gray", "dash": "dot", "width": 1},
+        annotation_text="chance",
+        annotation_position="bottom right",
+    )
+    figure.add_vline(x=0, line={"color": "black", "dash": "dash", "width": 1})
+    figure.update_layout(
+        title=BEST_MODEL_TITLES[contrast],
+        xaxis_title="Time from image onset (s)",
+        yaxis_title="Balanced accuracy",
+        template="plotly_white",
+        height=480,
+        legend={"orientation": "h", "yanchor": "top", "y": -0.18, "x": 0},
+        margin={"l": 60, "r": 20, "t": 60, "b": 120},
+    )
+    return figure
+
+
+def run_best_models_stage(
+    *,
+    subjects_requested: list[str],
+    derivatives_root: Path,
+    output: Path,
+    n_jobs: int = 1,
+    seed: int = SEED,
+    resume: bool = True,
+) -> dict[str, object]:
+    """Decode both targets with the best model of each representation.
+
+    Curves land in ``<output>/best_models/<contrast>/curve_<representation>.csv``
+    next to their figures, a peak table and a report.
+    """
+    subjects = [str(subject).removeprefix("sub-").zfill(2) for subject in subjects_requested]
+    stage_dir = Path(output) / "best_models"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    report = Report(
+        title=f"MEG Faces - Best model per representation ({len(subjects)} participants)",
+        asset_urls="inline",
+    )
+    overview = Section(
+        "Overview",
+        icon="O",
+        description="Five representations, each with its best decoder, on two targets",
+        metadata={
+            "Participants": ", ".join(subjects),
+            "Sensor set": DEFAULT_SENSOR_SET,
+            "CV": "Leave one participant out",
+            "Decoder": "Sliding (one classifier per latency), fold-local scaling",
+            "Metric": "Balanced accuracy",
+            "Window": f"{BEST_MODEL_WINDOW[0]} to {BEST_MODEL_WINDOW[1]} s",
+        },
+    )
+    overview.add_element(
+        MarkdownElement(
+            "Each target is decoded from five representations: raw sensors, a shared "
+            "PCA basis, trajectory descriptors alone, participant-specific PCA aligned "
+            "to the training template, and aligned PCA augmented with descriptors. "
+            "Each representation uses the classifier, component count and descriptor "
+            "subset that decoded it best in an exploratory search; their "
+            "hyperparameters are fixed. Peaks are maxima within the plotted interval."
+        )
+    )
+    overview.add_element(
+        CalloutElement(
+            "These configurations were selected from a large search, so small "
+            "differences between the top curves are not evidence that one "
+            "representation is better. Alignment is transductive: unlabeled trials of "
+            "the held-out participant estimate that participant's rotation.",
+            kind="warning",
+            title="Selected configurations",
+        )
+    )
+    report.add_section(overview)
+
+    peaks = []
+    for index, (contrast, conditions) in enumerate(BEST_MODEL_CONTRASTS.items(), start=1):
+        contrast_dir = stage_dir / contrast
+        contrast_dir.mkdir(parents=True, exist_ok=True)
+        paths = {curve: contrast_dir / f"curve_{curve}.csv" for curve in BEST_MODEL_LABELS}
+        if resume and all(path.exists() for path in paths.values()):
+            print(f"[best models {contrast}] reusing saved curves -> {contrast_dir}")
+            tables = {curve: pd.read_csv(path) for curve, path in paths.items()}
+        else:
+            print(f"[best models {contrast}] decoding {conditions} -> {contrast_dir}")
+            data = _load_best_model_contrast(derivatives_root, subjects, conditions)
+            tables = {}
+            for curve, spec in BEST_MODELS[contrast].items():
+                result = Experiment(_best_model_config(spec, seed=seed, n_jobs=n_jobs)).run(
+                    data["X"],
+                    data["y"],
+                    groups=data["subject_ids"],
+                    sample_ids=data["trial_ids"],
+                    observation_level="epoch",
+                    inferential_unit="subject",
+                    time_axis=data["times"],
+                )
+                summary = result.get_temporal_score_summary()
+                summary = summary[summary["Metric"] == "balanced_accuracy"]
+                tables[curve] = summary[["Time", "Mean", "Std"]].reset_index(drop=True)
+                tables[curve].to_csv(paths[curve], index=False)
+            del data
+        figure = _plot_best_models(tables, contrast)
+        figure.write_html(contrast_dir / "figure.html", include_plotlyjs="cdn")
+        (contrast_dir / "figure.json").write_text(figure.to_json())
+        contrast_peaks = _best_model_peaks(tables, contrast)
+        peaks.append(contrast_peaks)
+
+        section = Section(
+            BEST_MODEL_TITLES[contrast],
+            icon=str(index),
+            description=f"Chance = {1 / len(conditions):.3f}",
+        )
+        section.add_element(PlotlyElement(figure, height="520px"))
+        section.add_element(
+            InteractiveTableElement(
+                contrast_peaks.drop(columns=["contrast"]),
+                title="Peak balanced accuracy within the plotted interval",
+            )
+        )
+        report.add_section(section)
+
+    peak_table = pd.concat(peaks, ignore_index=True)
+    peak_table.to_csv(stage_dir / "peak_summary.csv", index=False)
+    report.save(stage_dir / "report.html")
+    write_manifest(
+        stage_dir / "run_manifest.json",
+        {"subjects": subjects, "sensor_set": DEFAULT_SENSOR_SET, "seed": seed},
+        status="complete",
+    )
+    print(f"Saved best-model decoding -> {stage_dir}")
+    return {"peaks": peak_table}
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--subjects", nargs="*", default=["01", "02", "03", "04", "05", "06"])
+    parser.add_argument(
+        "--subjects",
+        nargs="*",
+        default=[f"{subject:02d}" for subject in range(1, 17)],
+        help="Prepared participant IDs (default: all 16).",
+    )
     parser.add_argument(
         "--derivatives-root",
         type=Path,
@@ -1800,7 +2171,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--sensor-set",
         choices=tuple(MEG_SENSOR_SETS),
-        default="all_sensors",
+        default=DEFAULT_SENSOR_SET,
     )
     parser.add_argument("--n-components", type=int, default=30)
     parser.add_argument("--small-n-components", type=int, default=3)
@@ -1845,6 +2216,16 @@ def main(argv: list[str] | None = None) -> None:
         help="Use the first three requested participants.",
     )
     parser.add_argument("--no-resume", action="store_false", dest="resume")
+    parser.add_argument(
+        "--best-models-only",
+        action="store_true",
+        help="Only decode both targets with the best model per representation.",
+    )
+    parser.add_argument(
+        "--skip-best-models",
+        action="store_true",
+        help="Skip the best-model stage that a sweep runs first.",
+    )
     args = parser.parse_args(argv)
 
     subjects = args.subjects[:3] if args.smoke else args.subjects
@@ -1858,9 +2239,23 @@ def main(argv: list[str] | None = None) -> None:
         "n_jobs": args.n_jobs,
         "seed": args.seed,
     }
-    # A bare invocation sweeps every default contrast; --conditions asks
-    # for one specific target instead.
-    if args.conditions is None or args.contrasts is not None or args.report_only:
+    # A bare invocation decodes the best model per representation and then sweeps
+    # every default contrast; --conditions asks for one specific target instead.
+    run_sweep = args.conditions is None or args.contrasts is not None or args.report_only
+    if args.best_models_only or (
+        run_sweep and not args.skip_best_models and not args.report_only
+    ):
+        run_best_models_stage(
+            subjects_requested=subjects,
+            derivatives_root=args.derivatives_root,
+            output=args.output,
+            n_jobs=args.n_jobs,
+            seed=args.seed,
+            resume=args.resume,
+        )
+        if args.best_models_only:
+            return
+    if run_sweep:
         run_contrast_sweep(
             contrasts=args.contrasts or DEFAULT_CONTRASTS,
             output=args.output,

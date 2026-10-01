@@ -98,6 +98,9 @@ def test_meg_sensor_sets_use_named_vectorview_regions():
             "Left-temporal",
             "Right-temporal",
         ),
+        "sensors_right_occipital": ("Right-occipital",),
+        "sensors_right_temporal": ("Right-temporal",),
+        "sensors_right_occipito_temporal": ("Right-occipital", "Right-temporal"),
     }
 
 

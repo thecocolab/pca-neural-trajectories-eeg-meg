@@ -61,6 +61,27 @@ output roots are:
 
 Raw data, derivatives, executed notebook output, and large models stay outside Git.
 
+## Scripts and notebooks
+
+Every notebook has a headless companion in `scripts/` that runs the same method on
+the full cohort by default (EEGBCI 1–109, of which 106 load; Wakeman–Henson 01–16)
+and saves every table, figure and a self-contained HTML report. The notebooks run
+on a handful of participants so they finish on a laptop; only the participant
+count differs.
+
+| Script (full cohort) | Notebook (same method) |
+|---|---|
+| `analysis_eegbci_main.py` (also writes `separation_speed.{svg,png,csv}`) | `tutorial_eegbci_main.ipynb` |
+| `analysis_eegbci_nonlinear.py` | `tutorial_eegbci_nonlinear.ipynb` |
+| `analysis_eegbci_decoding.py` | `tutorial_eegbci_decoding.ipynb` |
+| `analysis_megfaces_main.py` | `tutorial_megfaces_main.ipynb` |
+| `analysis_megfaces_spectral_envelopes.py` | `tutorial_megfaces_spectral_envelopes.ipynb` |
+| `analysis_megfaces_decoding.py` (`--best-models-only` for Step 13) | `tutorial_megfaces_decoding.ipynb` |
+
+MEG analyses default to the right-occipital sensor selection
+(`sensors_right_occipital`, 36 sensors) and fit each PCA basis on −0.2 to 0.6 s
+before applying it to the whole epoch.
+
 ## Loading Wakeman–Henson MEG
 
 One function handles the MEG data hand-off. Preparation is explicit because it
@@ -79,8 +100,10 @@ meg = load_wakeman_henson(
 
 Later calls omit `prepare=True`. Pass `spectral=True` to prepare/load the separate
 padded derivative set used by the Hilbert-envelope tutorial. `sensor_set` defaults
-to `all_sensors`; the optional `sensors_occipital`, `sensors_temporal`, and
-`sensors_occipito_temporal` choices use MNE's Neuromag VectorView helmet selections.
+to `all_sensors`; the optional `sensors_occipital`, `sensors_temporal`,
+`sensors_occipito_temporal`, `sensors_right_occipital`,
+`sensors_right_temporal` and `sensors_right_occipito_temporal` choices use MNE's
+Neuromag VectorView helmet selections.
 They are sensor-position subsets, not source-localized cortical ROIs.
 
 ## Full EEG analysis
@@ -150,7 +173,8 @@ sensor and transductively aligned-PCA LOSO experiments:
 
 ```bash
 python scripts/analysis_megfaces_decoding.py --smoke
-python scripts/analysis_megfaces_decoding.py
+python scripts/analysis_megfaces_decoding.py                     # best models, then the contrast sweep
+python scripts/analysis_megfaces_decoding.py --best-models-only  # best model per representation only
 python scripts/analysis_megfaces_decoding.py --sensor-set sensors_occipito_temporal
 ```
 

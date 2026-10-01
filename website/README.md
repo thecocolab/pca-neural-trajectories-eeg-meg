@@ -16,7 +16,7 @@ website/
 ```bash
 python3 website/build.py                 # incremental: copies new/changed reports only
 python3 website/build.py --clean         # rebuild reports/ from scratch
-python3 website/build.py --source outputs/v3
+python3 website/build.py --source outputs/release
 ```
 
 Re-run it whenever more reports finish transferring. Reports that are not there yet are
@@ -28,7 +28,6 @@ Then open `website/index.html` in a browser.
 
 - **Wording, colours, layout** — `template.html`. `<!-- CONTENT -->` is where the generated
   dataset tabs and group accordions are injected, `<!-- BUILT -->` is the build date.
-  The repository link in the header is a placeholder; set it before publishing.
 - **Which analyses appear, and where** — the configuration block at the top of `build.py`:
   `ANALYSES` maps an output directory to a dataset and group, `DATASETS` and `GROUPS`
   hold the headings and descriptions, `LABELS` gives nicer names to path segments,

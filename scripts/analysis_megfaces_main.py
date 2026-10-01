@@ -53,7 +53,12 @@ from pca_neural_trajectories.wakeman_henson import (
 
 CONDITIONS = (1, 2, 3)
 N_DISPLAY_COMPONENTS = 3
+DEFAULT_SENSOR_SET = "sensors_right_occipital"
 ACTIVE_WINDOW = (0.0, 0.6)
+# PCA bases are fit only on this window (baseline through 600 ms) and then
+# applied (transform) to the full epoch, so the fitted subspace isn't diluted
+# by the 0.6-0.8 s tail while baseline-relative scores stay available.
+FIT_WINDOW = (-0.2, 0.6)
 FOCUSED_PAIRS = {
     "Famous vs Unfamiliar": (1, 2),
     "Famous vs Scrambled": (1, 3),
@@ -125,7 +130,7 @@ def run_megfaces_main_analysis(
     n_components: int = 10,
     n_perm: int = 200,
     seed: int = 42,
-    sensor_set: str = "all_sensors",
+    sensor_set: str = DEFAULT_SENSOR_SET,
 ) -> dict[str, object]:
     """Run the notebook-equivalent MEG Faces analysis and save its full bundle."""
     if metric_pca_mode not in {"shared", "subject", "both"}:
@@ -199,9 +204,14 @@ def run_megfaces_main_analysis(
     n_trials, n_sensors, n_times = X.shape
     baseline_mask = times < 0
     active_mask = (times >= ACTIVE_WINDOW[0]) & (times <= ACTIVE_WINDOW[1])
+    fit_mask = (times >= FIT_WINDOW[0]) & (times <= FIT_WINDOW[1])
     if not baseline_mask.any() or active_mask.sum() < 2:
         raise RuntimeError(
             "The loaded epoch must include pre-stimulus samples and 0--0.6 s."
+        )
+    if fit_mask.sum() < n_components:
+        raise RuntimeError(
+            f"Fit window {FIT_WINDOW} yields fewer timepoints than n_components."
         )
     active_times = times[active_mask]
     print(f"data shape: {X.shape} (trial, sensor, time)")
@@ -226,6 +236,24 @@ def run_megfaces_main_analysis(
             sensor_magnitude[condition].append(
                 np.sqrt(np.mean(evoked**2, axis=0))
             )
+
+    # Tidy per-subject RMS ERP timeseries, saved so the sensor-space ERP panel
+    # can be reloaded and restyled later without rerunning the analysis.
+    sensor_erp_timeseries = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "condition": LABEL_NAMES[condition],
+                    "subject": subject,
+                    "time_s": times,
+                    "rms": curve,
+                }
+            )
+            for condition in CONDITIONS
+            for subject, curve in zip(unique_subjects, sensor_magnitude[condition])
+        ],
+        ignore_index=True,
+    )
 
     # One curve per participant, grouped by condition: plot_timecourses draws
     # the group mean with an SEM band.
@@ -259,10 +287,12 @@ def run_megfaces_main_analysis(
 
     # ------------------------------------------------------------------ Steps 3--5
     pooled = X.transpose(0, 2, 1).reshape(n_trials * n_times, n_sensors)
+    pooled_fit = X[:, :, fit_mask].transpose(0, 2, 1).reshape(-1, n_sensors)
     shared_pca = DimReduction(
         method="PCA", n_components=n_components, random_state=seed
     )
-    scores_flat = shared_pca.fit_transform(pooled)
+    shared_pca.fit(pooled_fit)
+    scores_flat = shared_pca.transform(pooled)
     diagnostics = shared_pca.get_diagnostics()
     explained_variance = np.asarray(diagnostics["explained_variance_ratio_"])
     shared_variance = pd.DataFrame(
@@ -296,10 +326,14 @@ def run_megfaces_main_analysis(
             subject_matrix = X_subject.transpose(0, 2, 1).reshape(
                 n_subject_trials * n_times, n_sensors
             )
+            subject_matrix_fit = X_subject[:, :, fit_mask].transpose(0, 2, 1).reshape(
+                -1, n_sensors
+            )
             subject_pca = DimReduction(
                 method="PCA", n_components=n_components, random_state=seed
             )
-            subject_flat = subject_pca.fit_transform(subject_matrix)
+            subject_pca.fit(subject_matrix_fit)
+            subject_flat = subject_pca.transform(subject_matrix)
             subject_traj = subject_flat.reshape(
                 n_subject_trials, n_times, n_components
             )
@@ -408,6 +442,7 @@ def run_megfaces_main_analysis(
         smooth_window=12,
         show_markers=False,
         add_start_end_markers=True,
+        axis_labels=["PC1", "PC2"],
     )
     fig_3d = plot_trajectory(
         X=group_trajectories[..., :3],
@@ -421,6 +456,7 @@ def run_megfaces_main_analysis(
         linewidth=10,
         add_start_end_markers=True,
         height=700,
+        axis_labels=["PC1", "PC2", "PC3"],
     )
 
     # ------------------------------------------------------------------ Steps 7--8
@@ -461,6 +497,7 @@ def run_megfaces_main_analysis(
                 },
                 title=f"{space}: {name}",
                 ylabel="Baseline-relative distance",
+                xaxis_title="Time (s)",
             )
             participants.update_traces(line={"width": 1}, showlegend=False)
             group = plot_timecourses(
@@ -685,6 +722,7 @@ def run_megfaces_main_analysis(
             color_map={LABEL_NAMES[c]: CONDITION_COLORS[c] for c in CONDITIONS},
             title=space,
             ylabel="Speed (a.u./s)",
+            xaxis_title="Time (s)",
         )
         participants.update_traces(line={"width": 1}, showlegend=False)
         group = plot_timecourses(
@@ -765,10 +803,14 @@ def run_megfaces_main_analysis(
         pair_matrix = X_pair.transpose(0, 2, 1).reshape(
             n_pair_trials * n_times, n_sensors
         )
+        pair_matrix_fit = X_pair[:, :, fit_mask].transpose(0, 2, 1).reshape(
+            -1, n_sensors
+        )
         pair_pca = DimReduction(
             method="PCA", n_components=n_components, random_state=seed
         )
-        pair_flat = pair_pca.fit_transform(pair_matrix)
+        pair_pca.fit(pair_matrix_fit)
+        pair_flat = pair_pca.transform(pair_matrix)
         pair_scores = pair_flat.reshape(n_pair_trials, n_times, n_components)
         pair_scores -= pair_scores[:, baseline_mask].mean(axis=1, keepdims=True)
         subject_pair_means = {
@@ -837,6 +879,7 @@ def run_megfaces_main_analysis(
             show_markers=False,
             smooth_window=12,
             add_start_end_markers=True,
+            axis_labels=["PC1", "PC2", "PC3"],
         )
 
     focused_variance = pd.DataFrame(
@@ -899,6 +942,7 @@ def run_megfaces_main_analysis(
             },
             title=pair_name,
             ylabel="Baseline-relative distance",
+            xaxis_title="Time (s)",
         )
         participants.update_traces(line={"width": 1}, showlegend=False)
         group = plot_timecourses(
@@ -940,6 +984,7 @@ def run_megfaces_main_analysis(
         "shared_variance": shared_variance,
         "subject_variance": subject_variance,
         "strongest_sensor_loadings": loading_table,
+        "sensor_erp_timeseries": sensor_erp_timeseries,
         "planned_contrast_timeseries": contrast_timeseries,
         "planned_contrasts": contrast_summary,
         "planned_contrasts_group": contrast_group_summary,
@@ -1029,7 +1074,7 @@ def run_megfaces_main_analysis(
             "Participants": len(unique_subjects),
             "Trials": f"{X.shape[0]:,}",
             "Variance @ 3 PCs": f"{explained_variance[:3].sum():.1%}",
-            "Sensors": f"{n_sensors} ({sensor_set})",
+            "Sensors": str(n_sensors),
             "Permutations": n_perm,
         }
     )
@@ -1047,6 +1092,7 @@ def run_megfaces_main_analysis(
             "PCA metric mode": str(metric_pca_mode),
             "Components": str(n_components),
             "Active window": f"{ACTIVE_WINDOW[0]:.1f}-{ACTIVE_WINDOW[1]:.1f} s",
+            "PCA fit window": f"{FIT_WINDOW[0]:.1f}-{FIT_WINDOW[1]:.1f} s",
             "Permutations": str(n_perm),
             "Whitening": str(container.meta.get("whitening", "not recorded")),
         },
@@ -1424,6 +1470,7 @@ def run_megfaces_main_analysis(
         "n_components": n_components,
         "display_components": N_DISPLAY_COMPONENTS,
         "active_window": list(ACTIVE_WINDOW),
+        "pca_fit_window": list(FIT_WINDOW),
         "n_permutations": n_perm,
         "random_state": seed,
         "shape": list(X.shape),
@@ -1449,8 +1496,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--subjects",
         nargs="*",
-        default=["01", "02", "03", "04", "05", "06"],
-        help="Prepared participant IDs (default: 01 through 06).",
+        default=[f"{subject:02d}" for subject in range(1, 17)],
+        help="Prepared participant IDs (default: all 16).",
     )
     parser.add_argument(
         "--derivatives-root",
@@ -1470,7 +1517,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--sensor-set",
         choices=tuple(MEG_SENSOR_SETS),
-        default="all_sensors",
+        default=DEFAULT_SENSOR_SET,
     )
     parser.add_argument(
         "--metric-pca-mode",

@@ -149,6 +149,123 @@ def _stack(*elements: Element) -> ContainerElement:
     return box
 
 
+FGH_SEPARATION_PAIRS = (
+    ("Left Hand (Imag) vs Right Hand (Imag)", "Left Hand (Exec) vs Right Hand (Exec)"),
+    ("Right Hand (Exec) vs Right Hand (Imag)", "Left Hand (Exec) vs Left Hand (Imag)"),
+)
+FGH_SEPARATION_COLORS = (("#d62728", "gray"), ("#009E73", "#CC79A7"))
+FGH_SEPARATION_SMOOTH = 15
+FGH_SPEED_SMOOTH = 10
+
+
+def save_separation_speed_figure(
+    out: Path,
+    *,
+    times: np.ndarray,
+    separation_erp: dict,
+    speeds: np.ndarray,
+    speed_labels: np.ndarray,
+    color_map: dict[str, str],
+    linestyle_map: dict[str, str],
+) -> pd.DataFrame:
+    """ERP-basis condition separation and single-trial speed, as one multipanel.
+
+    The first two panels are centroid distances between subject-mean ERP
+    trajectories (all fitted PCs, PC-space baselined) smoothed with a centred
+    rolling mean; the third is the per-condition mean single-trial speed with its
+    SEM band. Same computation as the tutorial notebook's static multipanel;
+    saves the SVG/PNG and the plotted series.
+    """
+    import coco_pipe.viz.dim_reduction as viz_static
+    import matplotlib.pyplot as plt
+    from coco_pipe.viz.theme import coco_theme
+
+    separation = format_pair_keys(separation_erp, LABEL_NAMES, exclude_pairs=EXCLUDED_PAIRS)
+
+    def lookup(pair: str) -> tuple[str, np.ndarray]:
+        reverse = " vs ".join(pair.split(" vs ")[::-1])
+        key = pair if pair in separation else reverse
+        return key, np.asarray(separation[key])
+
+    rows = []
+    with coco_theme():
+        figure, axes = plt.subplots(1, 3, figsize=(24, 6))
+        for ax, pairs, colors in zip(
+            axes[:2], FGH_SEPARATION_PAIRS, FGH_SEPARATION_COLORS, strict=True
+        ):
+            for pair, color in zip(pairs, colors, strict=True):
+                key, values = lookup(pair)
+                smoothed = (
+                    pd.Series(values)
+                    .rolling(window=FGH_SEPARATION_SMOOTH, min_periods=1, center=True)
+                    .mean()
+                    .to_numpy()
+                )
+                ax.plot(times, smoothed, label=key, color=color, linewidth=3)
+                rows.append(
+                    pd.DataFrame(
+                        {
+                            "panel": "hand" if ax is axes[0] else "mode",
+                            "series": key,
+                            "time_s": times,
+                            "value": smoothed,
+                        }
+                    )
+                )
+        viz_static.plot_trajectory_metric_series(
+            series=speeds,
+            times=times[1:],
+            labels=speed_labels,
+            color_map=color_map,
+            linestyle_map=linestyle_map,
+            smooth_window=FGH_SPEED_SMOOTH,
+            title="",
+            ylabel="",
+            ax=axes[2],
+        )
+        if axes[2].get_legend():
+            axes[2].get_legend().remove()
+        for line in axes[2].get_lines():
+            if line.get_label() and not line.get_label().startswith("_"):
+                rows.append(
+                    pd.DataFrame(
+                        {
+                            "panel": "speed",
+                            "series": line.get_label(),
+                            "time_s": line.get_xdata(),
+                            "value": line.get_ydata(),
+                        }
+                    )
+                )
+        axes[0].set_ylabel("Euclidean distance (a.u.)", fontsize=35)
+        axes[1].set_xlabel("Time (s)", fontsize=35)
+        axes[2].set_ylabel("Speed (a.u./s)", fontsize=35)
+        for ax in axes:
+            ax.tick_params(labelsize=30, bottom=False, left=False)
+            ax.locator_params(axis="both", nbins=4)
+        handles, labels = [], []
+        for ax in axes:
+            ax_handles, ax_labels = ax.get_legend_handles_labels()
+            handles += ax_handles
+            labels += ax_labels
+        figure.legend(
+            handles,
+            labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.0),
+            ncol=4,
+            fontsize=25,
+            frameon=False,
+        )
+        figure.tight_layout()
+        for suffix in ("svg", "png"):
+            figure.savefig(out / f"separation_speed.{suffix}", dpi=300, bbox_inches="tight")
+        plt.close(figure)
+    data = pd.concat(rows, ignore_index=True)
+    data.to_csv(out / "separation_speed.csv", index=False)
+    return data
+
+
 def _resolve_subjects(spec: list[int] | None) -> list[int]:
     if spec is None or not spec:
         return list(range(1, 110))
@@ -363,6 +480,7 @@ def run_main_analysis(
         title="Step 7 — Subject-mean ERP trajectories (PC1–PC2)",
         dimensions=2,
         smooth_window=30,
+        axis_labels=["PC1", "PC2"],
     )
     fig_traj_3d = plot_trajectory(
         X=traj_mean_erp[..., :3],
@@ -375,6 +493,7 @@ def run_main_analysis(
         smooth_window=12,
         show_markers=False,
         add_start_end_markers=True,
+        axis_labels=["PC1", "PC2", "PC3"],
     )
 
     # --------------------------------------------------------------------- Step 8
@@ -409,6 +528,7 @@ def run_main_analysis(
         title="Step 8a — Euclidean Separation Timecourse (Single-Trial PCA)",
         color_map=PAIR_COLORS,
         smooth_window=10,
+        xaxis_title="Time (s)",
     )
     fig_sep_m = plot_trajectory_separation(
         format_pair_keys(
@@ -420,6 +540,7 @@ def run_main_analysis(
         title="Step 8b — Mahalanobis Separation Timecourse (Single-Trial PCA)",
         color_map=PAIR_COLORS,
         smooth_window=10,
+        xaxis_title="Time (s)",
     )
     fig_sep_erp = plot_trajectory_separation(
         format_pair_keys(
@@ -431,6 +552,7 @@ def run_main_analysis(
         title="Step 8c — Euclidean Separation Timecourse (ERP PCA)",
         color_map=PAIR_COLORS,
         smooth_window=10,
+        xaxis_title="Time (s)",
     )
 
     pair_scalars = traj_res_trials.get_separation_pair_scalars(
@@ -505,6 +627,7 @@ def run_main_analysis(
         color_map=color_map_str,
         linestyle_map=dash_map_str,
         smooth_window=10,
+        xaxis_title="Time (s)",
     )
 
     spread_dict = {
@@ -521,6 +644,7 @@ def run_main_analysis(
         color_map=color_map_str,
         linestyle_map=dash_map_str,
         smooth_window=2,
+        xaxis_title="Time (s)",
     )
 
     all_distances = np.linalg.norm(traj_res_trials.trajectories, axis=-1)
@@ -533,6 +657,7 @@ def run_main_analysis(
         color_map=color_map_str,
         linestyle_map=dash_map_str,
         smooth_window=5,
+        xaxis_title="Time (s)",
     )
 
     scalar_metrics = traj_res_trials.get_per_trial_scalars()
@@ -1138,6 +1263,15 @@ def run_main_analysis(
     report.add_section(sec10)
 
     report.save(str(out / "report.html"))
+    save_separation_speed_figure(
+        out,
+        times=times,
+        separation_erp=sep_timecourses_erp["centroid"],
+        speeds=all_speeds,
+        speed_labels=condition_labels,
+        color_map=color_map_str,
+        linestyle_map=dash_map_str,
+    )
 
     # ------------------------------------------------------------------ Save artifacts
     save_artifacts(
