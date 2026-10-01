@@ -3,233 +3,250 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PCA Neural Trajectories — Results</title>
-<meta name="description" content="Interactive analysis reports for the PCA-based trajectory analysis tutorial series for EEG and MEG.">
+<title>Neural trajectories with PCA: EEG and MEG results</title>
+<meta name="description" content="Interactive results for a tutorial on PCA-based trajectory analysis of EEG and MEG.">
 <style>
-  /* ---- design tokens ------------------------------------------------- */
   :root {
-    --bg: #ffffff;
-    --surface: #f7f8f9;
-    --text: #16191d;
-    --muted: #5f6771;
-    --border: #e0e3e7;
-    --accent: #1f4e79;
-    --accent-soft: #eaf0f6;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    --width: 880px;
+    --bg: #fdfcfa;
+    --panel: #ffffff;
+    --ink: #1c1b19;
+    --soft: #5d5a55;
+    --line: #e4e0d8;
+    --accent: #8a3324;
+    --accent-bg: #f6ece8;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --width: 1040px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14171a;
-      --surface: #1b1f23;
-      --text: #e6e9ec;
-      --muted: #9aa3ad;
-      --border: #2c3238;
-      --accent: #7fb2e0;
-      --accent-soft: #1e2831;
+      --bg: #171614;
+      --panel: #1f1e1b;
+      --ink: #ece9e3;
+      --soft: #a8a39a;
+      --line: #35332e;
+      --accent: #e39a86;
+      --accent-bg: #2b2220;
     }
   }
 
-  /* ---- base ---------------------------------------------------------- */
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0;
-    padding: 0 1.25rem 5rem;
     background: var(--bg);
-    color: var(--text);
+    color: var(--ink);
     font-family: var(--sans);
-    font-size: 16px;
-    line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
+    font-size: 17px;
+    line-height: 1.6;
   }
-  main { max-width: var(--width); margin: 0 auto; }
-  a { color: var(--accent); }
-  h1, h2, h3 { line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+  .wrap { max-width: var(--width); margin: 0 auto; padding: 0 1.25rem; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.2; margin: 0; }
+  h2 { font-size: 1.7rem; margin-bottom: .4rem; }
+  section { padding: 3.5rem 0 0; scroll-margin-top: 3.5rem; }
+  .intro { color: var(--soft); max-width: 42rem; margin: 0 0 1.75rem; }
 
-  /* ---- header -------------------------------------------------------- */
-  header { padding: 4rem 0 2rem; border-bottom: 1px solid var(--border); }
-  header h1 { margin: 0 0 .5rem; font-size: 1.9rem; }
-  header .subtitle { margin: 0 0 1.5rem; color: var(--muted); font-size: 1.05rem; }
-  header p { margin: 0 0 1rem; }
-  .links { display: flex; flex-wrap: wrap; gap: 1.25rem; font-size: .9rem; margin-top: 1.5rem; }
-
-  /* ---- dataset tabs -------------------------------------------------- */
-  .tabs {
-    display: flex; flex-wrap: wrap; gap: .5rem;
-    margin: 2.5rem 0 1.5rem;
-  }
-  .tab {
-    flex: 1 1 240px;
-    text-align: left;
-    padding: .9rem 1.1rem;
+  /* top bar */
+  .top {
+    position: sticky; top: 0; z-index: 5;
     background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background .12s, border-color .12s;
+    border-bottom: 1px solid var(--line);
   }
-  .tab .tab-sub { display: block; font-size: .8rem; font-weight: 400; color: var(--muted); margin-top: .15rem; }
-  .tab:hover { border-color: var(--accent); }
-  .tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); }
+  .top .wrap { display: flex; align-items: center; gap: 1.5rem; min-height: 3.2rem; }
+  .top .name { font-family: var(--serif); font-weight: 600; margin-right: auto; color: var(--ink); text-decoration: none; }
+  .top nav { display: flex; gap: 1.25rem; font-size: .92rem; }
+  .top nav a { color: var(--soft); text-decoration: none; }
+  .top nav a:hover { color: var(--accent); }
 
-  /* ---- dataset panels ------------------------------------------------ */
-  .dataset[hidden] { display: none; }
-  .dataset > .blurb { color: var(--muted); font-size: .95rem; margin: 0 0 1.75rem; }
+  /* opening */
+  .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 3rem; align-items: center; padding-top: 3.5rem; }
+  .hero > div:only-child { grid-column: 1 / -1; max-width: 44rem; }
+  .hero h1 { font-size: 2.6rem; letter-spacing: -.01em; }
+  .hero .sub { font-family: var(--serif); font-size: 1.25rem; color: var(--soft); margin: .5rem 0 1.4rem; }
+  .hero p { margin: 0 0 1rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.6rem; }
+  .button {
+    display: inline-block; padding: .6rem 1.1rem;
+    border: 1px solid var(--accent); border-radius: 4px;
+    color: var(--accent); text-decoration: none; font-size: .95rem; font-weight: 500;
+  }
+  .button.main { background: var(--accent); color: var(--bg); }
+  .button:hover { filter: brightness(1.1); }
 
-  .filter {
-    width: 100%;
-    padding: .55rem .75rem;
-    margin-bottom: 1.5rem;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-family: inherit;
-    font-size: .9rem;
+  figure { margin: 0; }
+  .traj { width: 100%; height: auto; display: block; }
+  .traj path { fill: none; stroke: var(--c); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+  .traj path.axis { stroke: var(--line); stroke-width: 1; animation: none; stroke-dasharray: none; }
+  .traj circle { fill: var(--c); }
+  .traj circle.start { fill: var(--ink); }
+  .traj text { fill: var(--soft); font-family: var(--sans); font-size: 12px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .traj path { stroke-dasharray: 1; animation: draw 3.5s ease-out .3s backwards; }
+    @keyframes draw { from { stroke-dashoffset: 1; } }
   }
-  .filter:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .85rem; margin: .4rem 0 .5rem; padding: 0; list-style: none; }
+  .key li::before { content: ""; display: inline-block; width: 1.1rem; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: .4rem; background: var(--c); }
+  figcaption { font-size: .85rem; color: var(--soft); line-height: 1.5; }
 
-  /* ---- groups (accordions) ------------------------------------------- */
-  details.group {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    margin-bottom: .75rem;
-    background: var(--bg);
+  /* the four reports to start with */
+  .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+  .card {
+    display: block; padding: 1.3rem 1.4rem 1.2rem;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    color: inherit; text-decoration: none;
   }
-  details.group[hidden] { display: none; }
-  details.group > summary {
-    list-style: none;
-    cursor: pointer;
-    padding: .85rem 1.1rem;
-    display: flex;
-    align-items: baseline;
-    gap: .6rem;
-    font-weight: 600;
-  }
-  details.group > summary::-webkit-details-marker { display: none; }
-  details.group > summary::before {
-    content: "▸";
-    color: var(--muted);
-    font-size: .8rem;
-    transition: transform .15s;
-  }
-  details.group[open] > summary::before { transform: rotate(90deg); }
-  details.group[open] > summary { border-bottom: 1px solid var(--border); }
-  summary .count {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: .75rem;
-    font-weight: 400;
-    color: var(--muted);
-  }
-  .group-blurb {
-    margin: 0;
-    padding: .85rem 1.1rem .25rem;
-    color: var(--muted);
-    font-size: .88rem;
-  }
+  .card:hover { border-color: var(--accent); }
+  .card .where { font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); }
+  .card h3 { font-size: 1.25rem; margin: .25rem 0 .45rem; }
+  .card p { margin: 0 0 .8rem; font-size: .95rem; color: var(--soft); }
+  .card .go { font-size: .9rem; color: var(--accent); font-weight: 500; }
 
-  /* ---- report links -------------------------------------------------- */
-  ul.reports { list-style: none; margin: 0; padding: .5rem .6rem .6rem; }
-  ul.reports li[hidden] { display: none; }
-  a.report {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: .3rem .75rem;
-    padding: .5rem .5rem;
-    border-radius: 4px;
-    text-decoration: none;
-    color: inherit;
+  /* every report, by dataset */
+  .dataset { margin-top: 2.25rem; }
+  .dataset h3 { font-size: 1.3rem; }
+  .dataset .about { color: var(--soft); font-size: .95rem; margin: .3rem 0 1rem; max-width: 46rem; }
+  .picker { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .4rem; font-size: .9rem; }
+  .picker .ask { color: var(--soft); margin-right: .3rem; }
+  .picker button {
+    padding: .35rem .8rem; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
   }
-  a.report:hover { background: var(--surface); }
-  a.report .label { font-weight: 500; color: var(--accent); }
-  a.report .desc { color: var(--muted); font-size: .85rem; flex: 1 1 14rem; }
-  a.report .size { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
-  .empty { padding: .6rem 1.1rem 1rem; color: var(--muted); font-size: .9rem; }
+  .picker button:hover { border-color: var(--accent); }
+  .picker button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .picker-note { font-size: .82rem; color: var(--soft); margin: 0 0 1rem; }
+  .rows { border-top: 1px solid var(--line); }
+  .row { display: grid; grid-template-columns: 15rem 1fr; gap: .4rem 2rem; padding: 1.1rem 0; border-bottom: 1px solid var(--line); }
+  .row h4 { margin: 0; font-size: 1rem; font-weight: 600; }
+  .row p { margin: 0 0 .5rem; font-size: .93rem; color: var(--soft); }
+  .row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; font-size: .95rem; }
+  .row li[hidden] { display: none; }
 
-  /* ---- footer -------------------------------------------------------- */
-  footer {
-    max-width: var(--width);
-    margin: 3rem auto 0;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--border);
-    color: var(--muted);
-    font-size: .82rem;
+  /* notebooks */
+  ol.notebooks { margin: 0; padding: 0; list-style: none; counter-reset: nb; border-top: 1px solid var(--line); }
+  ol.notebooks li { counter-increment: nb; display: grid; grid-template-columns: 2rem 1fr; padding: .85rem 0; border-bottom: 1px solid var(--line); }
+  ol.notebooks li::before { content: counter(nb); font-family: var(--serif); font-size: 1.2rem; color: var(--soft); }
+  ol.notebooks p { margin: .1rem 0 0; font-size: .93rem; color: var(--soft); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em; }
+
+  footer { margin-top: 4rem; padding: 1.5rem 0 3rem; border-top: 1px solid var(--line); color: var(--soft); font-size: .85rem; }
+  footer p { margin: 0 0 .5rem; max-width: 46rem; }
+
+  @media (max-width: 800px) {
+    .hero { grid-template-columns: 1fr; gap: 2rem; padding-top: 2.25rem; }
+    .hero h1 { font-size: 2rem; }
+    .cards { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr; }
+    .top nav a.extra { display: none; }
   }
-  footer code { font-family: var(--mono); }
 </style>
 </head>
 <body>
-<main>
 
-<header>
-  <h1>A Primer on Low-Dimensional Neural Dynamics</h1>
-  <p class="subtitle">PCA-based trajectory analysis for EEG and MEG — interactive analysis reports</p>
+<div class="top">
+  <div class="wrap">
+    <a class="name" href="#top">Neural trajectories with PCA</a>
+    <nav>
+      <a href="#start">Start here</a>
+      <a href="#reports">All reports</a>
+      <a class="extra" href="#notebooks">Notebooks</a>
+      <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">GitHub</a>
+    </nav>
+  </div>
+</div>
 
-  <p>
-    Averaging across sensors hides the fact that an evoked response is a <em>path</em>: the sensor
-    pattern moves through a state space over time. These analyses fit a principal-component basis to
-    sensor-space data, plot the resulting condition trajectories, and test how far that compact
-    coordinate system carries — through geometric descriptors, nonlinear-embedding comparisons,
-    frequency-band envelopes, and leakage-safe cross-participant decoding.
+<main class="wrap" id="top">
+
+<div class="hero">
+  <div>
+    <h1>A primer on low-dimensional neural dynamics</h1>
+    <p class="sub">PCA-based trajectory analysis for EEG and MEG</p>
+    <p>
+      An evoked response is usually drawn as one curve per sensor. The sensors don't change
+      independently, though. The whole pattern moves together, and PCA lets you follow that
+      movement as a path through a few dimensions.
+    </p>
+    <p>
+      This site holds the results that go with our tutorial, on two open datasets. The figures
+      are interactive, so you can rotate them, zoom in, and check the numbers behind them.
+    </p>
+    <div class="actions">
+      <a class="button main" href="#start">See the main results</a>
+      <a class="button" href="#notebooks">Run the notebooks</a>
+    </div>
+  </div>
+
+<!-- HERO -->
+</div>
+
+<section id="start">
+  <h2>Start here</h2>
+  <p class="intro">
+    Four reports cover the main results. Each one walks through an analysis step by step, with
+    the figures, the tables and the settings of the run.
   </p>
-  <p>
-    Every link below opens a self-contained interactive report: figures, tables, statistics, and the
-    provenance of the run that produced them. Pick a dataset, then a family of analyses.
+  <div class="cards">
+<!-- FEATURED -->
+  </div>
+</section>
+
+<section id="reports">
+  <h2>All reports</h2>
+  <p class="intro">
+    Everything we ran, by dataset. Reports are single HTML files of 5 to 20 MB, so give them a
+    few seconds to load.
   </p>
+<!-- REPORTS -->
+</section>
 
-  <nav class="links">
-    <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">Code &amp; tutorials</a>
-    <a href="https://physionet.org/content/eegmmidb/1.0.0/">PhysioNet EEGMMIDB</a>
-    <a href="https://openneuro.org/datasets/ds000117">OpenNeuro ds000117</a>
-  </nav>
-</header>
-
-<!-- CONTENT -->
-
-</main>
+<section id="notebooks">
+  <h2>Run it yourself</h2>
+  <p class="intro">
+    Six notebooks, meant to be read in this order. They use a handful of participants so they
+    finish on a laptop. Each has a script in <code>scripts/</code> that runs the same analysis
+    on everyone and writes the reports above.
+    <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg#readme">Installation notes are in the README.</a>
+  </p>
+  <ol class="notebooks">
+    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_main.ipynb">EEG: the core workflow</a>
+      <p>Fit PCA, plot trajectories for executed and imagined hand movements, and measure how they differ.</p></div></li>
+    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_nonlinear.ipynb">EEG: PCA next to UMAP, PHATE and Isomap</a>
+      <p>The same data through three nonlinear methods, and how to compare them fairly.</p></div></li>
+    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_decoding.ipynb">EEG: decoding across participants</a>
+      <p>Train on some people and test on someone new, from sensors and from aligned components.</p></div></li>
+    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_main.ipynb">MEG: faces in one shared space</a>
+      <p>Famous, unfamiliar and scrambled images in a single PCA space, with the two planned contrasts.</p></div></li>
+    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_spectral_envelopes.ipynb">MEG: frequency bands</a>
+      <p>Trajectories of alpha, beta and low-gamma power instead of the broadband signal.</p></div></li>
+    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_decoding.ipynb">MEG: decoding across participants</a>
+      <p>The decoding workflow again, this time on MEG.</p></div></li>
+  </ol>
+</section>
 
 <footer>
   <p>
-    Reports are static HTML with embedded Plotly figures; several are 5–20&nbsp;MB and take a moment
-    to render. Sensor-set names (right occipital, right temporal, right occipito-temporal) are
-    sensor-position subsets of the Neuromag helmet, not source-localized cortical regions.
+    Data: <a href="https://physionet.org/content/eegmmidb/1.0.0/">PhysioNet EEG Motor Movement/Imagery</a>
+    and <a href="https://openneuro.org/datasets/ds000117">Wakeman &amp; Henson faces (OpenNeuro ds000117)</a>.
+    Code: <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">thecocolab/pca-neural-trajectories-eeg-meg</a>.
   </p>
-  <p>Generated by <code>website/build.py</code> from <code>outputs/v2</code> on <!-- BUILT -->.</p>
+  <p>Last updated <!-- BUILT -->.</p>
 </footer>
 
-<script>
-  // Dataset tabs.
-  const tabs = document.querySelectorAll('.tab');
-  tabs.forEach(tab => tab.addEventListener('click', () => {
-    tabs.forEach(other => {
-      const selected = other === tab;
-      other.setAttribute('aria-selected', selected);
-      document.getElementById(other.dataset.panel).hidden = !selected;
-    });
-  }));
+</main>
 
-  // Filter reports by name within the visible dataset.
-  document.querySelectorAll('.filter').forEach(input => {
-    input.addEventListener('input', () => {
-      const query = input.value.trim().toLowerCase();
-      input.closest('.dataset').querySelectorAll('details.group').forEach(group => {
-        let matches = 0;
-        group.querySelectorAll('li').forEach(item => {
-          const hit = !query || item.textContent.toLowerCase().includes(query);
-          item.hidden = !hit;
-          matches += hit ? 1 : 0;
-        });
-        group.hidden = matches === 0;
-        if (query) group.open = true;
+<script>
+  // Sensor picker: point every link in the dataset at the chosen sensor selection.
+  document.querySelectorAll('.picker').forEach(picker => {
+    const links = picker.closest('.dataset').querySelectorAll('a[data-by-sensor]');
+    picker.querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
+      picker.querySelectorAll('button').forEach(other =>
+        other.setAttribute('aria-pressed', other === button));
+      links.forEach(link => {
+        const href = JSON.parse(link.dataset.bySensor)[button.dataset.sensor];
+        link.parentElement.hidden = !href;
+        if (href) link.href = href;
       });
-    });
+    }));
   });
 </script>
 </body>

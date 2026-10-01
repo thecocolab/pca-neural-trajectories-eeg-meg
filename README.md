@@ -1,91 +1,118 @@
-# PCA-Based Trajectory Analysis for EEG and MEG
+# PCA trajectories for EEG and MEG
 
-Code and tutorials for *A Primer on Low-Dimensional Neural Dynamics:
-PCA-Based Trajectory Analysis for EEG and MEG*. The repository presents a focused,
-sensor-space tutorial series rather than an exhaustive analysis framework.
+Code and notebooks for our tutorial paper, *A Primer on Low-Dimensional Neural
+Dynamics: PCA-Based Trajectory Analysis for EEG and MEG*.
+
+The idea is simple. An evoked response is a sensor pattern that changes over time.
+If you project it onto a few principal components, you can draw that change as a
+path and ask questions about its shape: when do two conditions separate, how fast
+does the pattern move, does it look the same in another person. The notebooks show
+how to do this on two open datasets, and where it stops working.
+
+**Results:** <https://thecocolab.github.io/pca-neural-trajectories-eeg-meg/>
 
 ## Install
 
-Python 3.11 is recommended.
+You need Python 3.11.
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-.venv/bin/pip install -e ".[test,meg]"
+pip install -e ".[test,meg]"
 ```
 
-The project depends on `coco-pipe[eeg,decoding,neighbor]`.
+Most of the analysis code lives in [coco-pipe](https://github.com/BabaSanfour/coco-pipe),
+which is installed as a dependency. This repository adds the data loading, the
+notebooks and the scripts.
 
-## Tutorial order
+## The notebooks
 
-All notebooks are committed with outputs cleared. Launch `jupyter lab`, select the
-portable `Python 3` kernel, and run them in this order:
+Start `jupyter lab`, pick the `Python 3` kernel, and go through them in order. They
+are saved without outputs.
 
-1. [`tutorial_eegbci_main.ipynb`](tutorials/tutorial_eegbci_main.ipynb)
-   — four left/right hand execution and imagery EEG trajectories with the core
-   PCA workflow.
-2. [`tutorial_eegbci_nonlinear.ipynb`](tutorials/tutorial_eegbci_nonlinear.ipynb)
-   — PCA/UMAP/PHATE/Isomap comparison, trial-respecting velocity fields, and
-   label-free subject-space alignment on the same EEGBCI observations.
-3. [`tutorial_eegbci_decoding.ipynb`](tutorials/tutorial_eegbci_decoding.ipynb)
-   — subject-disjoint EEG decoding from sensors versus fold-local temporal
-   Procrustes alignment. The shared reference uses training participants, the
-   held-out calibration is label-free, and channel normalization is fold-local.
-4. [`tutorial_megfaces_main.ipynb`](tutorials/tutorial_megfaces_main.ipynb)
-   — one broadband MEG space for Famous, Unfamiliar, and Scrambled images, with both
-   planned contrasts derived without refitting.
-5. [`tutorial_megfaces_spectral_envelopes.ipynb`](tutorials/tutorial_megfaces_spectral_envelopes.ipynb)
-   — alpha, beta, and 30–45 Hz low-gamma Hilbert amplitude envelopes. This requires a
-   distinct noise-whitened derivatives set (`-1.1..1.7 s`, providing 0.9 s around the
-   `-0.2..0.8 s` crop); the usual short MEG epochs are deliberately rejected as unsafe
-   for filtering/Hilbert edges.
-6. [`tutorial_megfaces_decoding.ipynb`](tutorials/tutorial_megfaces_decoding.ipynb)
-   — the same leakage-safe decoding and alignment workflow on whitened MEG,
-   with contrast-specific spaces and explicit transductive-alignment caveats.
+| | Notebook | What you do in it |
+|---|---|---|
+| 1 | [`tutorial_eegbci_main`](tutorials/tutorial_eegbci_main.ipynb) | The core workflow on EEG: left and right hand movement, executed and imagined. |
+| 2 | [`tutorial_eegbci_nonlinear`](tutorials/tutorial_eegbci_nonlinear.ipynb) | The same data through UMAP, PHATE and Isomap, compared with PCA. |
+| 3 | [`tutorial_eegbci_decoding`](tutorials/tutorial_eegbci_decoding.ipynb) | Decoding in a new participant, from sensors and from PCA components aligned between people. |
+| 4 | [`tutorial_megfaces_main`](tutorials/tutorial_megfaces_main.ipynb) | MEG: famous, unfamiliar and scrambled faces in one shared PCA space. |
+| 5 | [`tutorial_megfaces_spectral_envelopes`](tutorials/tutorial_megfaces_spectral_envelopes.ipynb) | Trajectories of alpha, beta and low-gamma (30–45 Hz) power. |
+| 6 | [`tutorial_megfaces_decoding`](tutorials/tutorial_megfaces_decoding.ipynb) | The decoding workflow again, on MEG. |
 
-The EEG introduction is typically 30–60 minutes after preprocessing; nonlinear and
-decoding notebooks take roughly 10–40 minutes depending on sample size. MEG
-preprocessing (especially Maxwell filtering) is much slower and requires substantial
-external storage. Notebooks never download or preprocess data implicitly. Expensive
-permutation branches are opt-in through the visible `RUN_PERMUTATIONS` notebook setting.
+A few things to know before you run them:
 
-Environment overrides are documented at the start of every notebook. The default
-output roots are:
+- **Time.** The first EEG notebook takes 30 to 60 minutes once the data is
+  preprocessed. The others take 10 to 40 minutes. MEG preprocessing is much slower
+  (Maxwell filtering) and needs a lot of disk space.
+- **Nothing is downloaded behind your back.** Downloading and preprocessing are
+  explicit steps. The settings you can change are listed at the top of each notebook.
+- **Permutation tests are off by default.** Set `RUN_PERMUTATIONS` in the notebook to
+  turn them on.
+- **The spectral notebook needs longer epochs** (−1.1 to 1.7 s) so that filtering and
+  the Hilbert transform don't contaminate the window we analyse. It refuses to run on
+  the usual short epochs.
+- Outputs go to `outputs/tutorial_*/`. Data, derivatives and outputs are not tracked
+  in Git.
 
-- `outputs/tutorial_eegbci/`
-- `outputs/tutorial_eegbci_nonlinear/`
-- `outputs/tutorial_eegbci_decoding/`
-- `outputs/tutorial_megfaces_main/<sensor-set>/`
-- `outputs/tutorial_megfaces_spectral_envelopes/<sensor-set>/`
-- `outputs/tutorial_megfaces_decoding/<sensor-set>/`
+## Notebooks and scripts
 
-Raw data, derivatives, executed notebook output, and large models stay outside Git.
+Each notebook has a script in `scripts/` that does the same analysis without Jupyter.
+The only difference is the number of participants: the notebooks use a few so they
+run on a laptop, and the scripts use everyone (106 for EEG, 16 for MEG). The numbers
+in the paper and the reports on the website come from the scripts.
 
-## Scripts and notebooks
-
-Every notebook has a headless companion in `scripts/` that runs the same method on
-the full cohort by default (EEGBCI 1–109, of which 106 load; Wakeman–Henson 01–16)
-and saves every table, figure and a self-contained HTML report. The notebooks run
-on a handful of participants so they finish on a laptop; only the participant
-count differs.
-
-| Script (full cohort) | Notebook (same method) |
+| Notebook | Script |
 |---|---|
-| `analysis_eegbci_main.py` (also writes `separation_speed.{svg,png,csv}`) | `tutorial_eegbci_main.ipynb` |
-| `analysis_eegbci_nonlinear.py` | `tutorial_eegbci_nonlinear.ipynb` |
-| `analysis_eegbci_decoding.py` | `tutorial_eegbci_decoding.ipynb` |
-| `analysis_megfaces_main.py` | `tutorial_megfaces_main.ipynb` |
-| `analysis_megfaces_spectral_envelopes.py` | `tutorial_megfaces_spectral_envelopes.ipynb` |
-| `analysis_megfaces_decoding.py` (`--best-models-only` for Step 13) | `tutorial_megfaces_decoding.ipynb` |
+| `tutorial_eegbci_main` | `analysis_eegbci_main.py` |
+| `tutorial_eegbci_nonlinear` | `analysis_eegbci_nonlinear.py` |
+| `tutorial_eegbci_decoding` | `analysis_eegbci_decoding.py` |
+| `tutorial_megfaces_main` | `analysis_megfaces_main.py` |
+| `tutorial_megfaces_spectral_envelopes` | `analysis_megfaces_spectral_envelopes.py` |
+| `tutorial_megfaces_decoding` | `analysis_megfaces_decoding.py` |
 
-MEG analyses default to the right-occipital sensor selection
-(`sensors_right_occipital`, 36 sensors) and fit each PCA basis on −0.2 to 0.6 s
-before applying it to the whole epoch.
+Every script writes its tables, figures and a single-file HTML report to
+`outputs/<analysis>/` (MEG scripts add a `<sensor-set>/` folder). PNG and SVG copies
+of the figures are written too when Kaleido can find a browser.
 
-## Loading Wakeman–Henson MEG
+### EEG
 
-One function handles the MEG data hand-off. Preparation is explicit because it
-downloads roughly 5 GB and runs expensive Maxwell/ICA processing per participant:
+```bash
+python scripts/analysis_eegbci_main.py --smoke --output outputs/smoke   # quick check
+python scripts/analysis_eegbci_main.py --output outputs/eegbci_main
+python scripts/analysis_eegbci_nonlinear.py --skip-prepare
+python scripts/analysis_eegbci_decoding.py
+```
+
+`analysis_eegbci_main.py` skips a run that already finished; pass `--no-resume` to
+redo it. It also writes `separation_speed.{svg,png,csv}`. The sample size in a report
+is the number of participants that actually loaded, which can be lower than what you
+asked for (106 of 109 for the full cohort).
+
+### MEG
+
+```bash
+python scripts/analysis_megfaces_main.py --smoke
+python scripts/analysis_megfaces_main.py --n-perm 1000
+
+python scripts/analysis_megfaces_spectral_envelopes.py --n-perm 1000
+python scripts/analysis_megfaces_spectral_envelopes.py --prepare    # build the long epochs first
+
+python scripts/analysis_megfaces_decoding.py                        # best models, then every contrast
+python scripts/analysis_megfaces_decoding.py --best-models-only
+```
+
+The MEG scripts expect derivatives that are already prepared. If yours are somewhere
+else, point to them with `--derivatives-root`.
+
+They use the right-occipital sensors (`sensors_right_occipital`, 36 sensors) unless
+you pass `--sensor-set`. Each PCA is fitted on −0.2 to 0.6 s and then applied to the
+whole epoch.
+
+## Getting the MEG data
+
+One function downloads, preprocesses and loads the Wakeman–Henson dataset. The first
+call needs `prepare=True`. It downloads about 5 GB and runs Maxwell filtering and ICA
+for each participant, so expect it to take a while.
 
 ```python
 from pca_neural_trajectories import load_wakeman_henson
@@ -98,93 +125,24 @@ meg = load_wakeman_henson(
 )
 ```
 
-Later calls omit `prepare=True`. Pass `spectral=True` to prepare/load the separate
-padded derivative set used by the Hilbert-envelope tutorial. `sensor_set` defaults
-to `all_sensors`; the optional `sensors_occipital`, `sensors_temporal`,
-`sensors_occipito_temporal`, `sensors_right_occipital`,
-`sensors_right_temporal` and `sensors_right_occipito_temporal` choices use MNE's
-Neuromag VectorView helmet selections.
-They are sensor-position subsets, not source-localized cortical ROIs.
+After that, leave `prepare=True` out. Pass `spectral=True` for the longer epochs used
+by the spectral notebook.
 
-## Full EEG analysis
+`sensor_set` can be `all_sensors` (the default here), `sensors_occipital`,
+`sensors_temporal`, `sensors_occipito_temporal`, or the right-hemisphere versions
+`sensors_right_occipital`, `sensors_right_temporal` and
+`sensors_right_occipito_temporal`. These are MNE's Neuromag VectorView helmet
+selections. They group sensors by position and say nothing about which part of the
+brain a signal comes from.
 
-The headless EEG workflow applies the notebook's four-condition execution/imagination
-analysis to the full cohort and records run provenance:
+## The website
 
-```bash
-python scripts/analysis_eegbci_main.py --smoke --output outputs/smoke
-python scripts/analysis_eegbci_main.py --output outputs/eegbci_main
-```
+`website/build.py` builds the results site from the reports the scripts produce. See
+[`website/README.md`](website/README.md).
 
-An existing completed run is skipped unless `--no-resume` is passed. Reported sample
-size is always the set that loaded and validated, not the requested number.
-
-The nonlinear EEGBCI tutorial has its own headless companion. It saves all tables,
-interactive figures, fitted reducers, arrays, a manifest, and a standalone HTML
-report organized into the same ten explained steps as the notebook. PNG/SVG copies
-are also written when Kaleido's browser backend is available:
+## Tests
 
 ```bash
-python scripts/analysis_eegbci_nonlinear.py --skip-prepare
-```
-
-The EEGBCI decoding notebook also has an equivalent headless workflow. It saves
-the raw `ExperimentResult` objects, tidy fold/prediction/split exports, summary
-tables, interactive and static figures, provenance, and the same self-contained
-ten-step report as the notebook:
-
-```bash
-python scripts/analysis_eegbci_decoding.py
-```
-
-The main MEG Faces tutorial has the same kind of executable companion. It reads
-the already-prepared, subject-wise whitened Wakeman–Henson derivatives and runs
-the complete shared/participant/focused PCA workflow. Every table, time-resolved
-metric, interactive figure, fitted reducer, array, permutation null, and manifest
-is saved alongside a self-contained HTML report:
-
-```bash
-python scripts/analysis_megfaces_main.py --smoke
-python scripts/analysis_megfaces_main.py --n-perm 1000
-python scripts/analysis_megfaces_main.py --sensor-set sensors_occipital
-```
-
-The default output is `outputs/megfaces_main/<sensor-set>/`. The script never downloads or
-preprocesses MEG data implicitly; use `--derivatives-root` when the prepared
-derivatives are stored outside the documented MNE data location.
-
-The spectral-envelope tutorial also has a complete report script. It uses the
-prepared long epochs by default; preparation from local raw data remains an
-explicit option because it is expensive:
-
-```bash
-python scripts/analysis_megfaces_spectral_envelopes.py --smoke
-python scripts/analysis_megfaces_spectral_envelopes.py --n-perm 1000
-python scripts/analysis_megfaces_spectral_envelopes.py --prepare
-python scripts/analysis_megfaces_spectral_envelopes.py --sensor-set sensors_temporal
-```
-
-Outputs are written to `outputs/megfaces_spectral_envelopes/<sensor-set>/` and include the
-offline HTML report, all figures and tables, processed arrays, PCA reducers,
-the family-corrected null, and provenance manifests.
-
-The MEG Faces decoding notebook has a matching report script for the direct
-sensor and transductively aligned-PCA LOSO experiments:
-
-```bash
-python scripts/analysis_megfaces_decoding.py --smoke
-python scripts/analysis_megfaces_decoding.py                     # best models, then the contrast sweep
-python scripts/analysis_megfaces_decoding.py --best-models-only  # best model per representation only
-python scripts/analysis_megfaces_decoding.py --sensor-set sensors_occipito_temporal
-```
-
-It saves the raw `ExperimentResult` exports, split audit, temporal and fold-level
-scores, participant summaries, figures, analysis arrays, manifests, and offline
-HTML report under `outputs/megfaces_decoding/<sensor-set>/`.
-
-## Verification
-
-```bash
-.venv/bin/ruff check pca_neural_trajectories tests scripts
-.venv/bin/python -m pytest
+ruff check pca_neural_trajectories tests scripts
+python -m pytest
 ```
