@@ -19,7 +19,7 @@ git -C "$repo" worktree add --detach "$worktree" >/dev/null
 git -C "$worktree" checkout --orphan "$build_branch" >/dev/null 2>&1
 git -C "$worktree" rm -rqf . >/dev/null 2>&1 || true
 
-cp -R "$repo/website/index.html" "$repo/website/reports" "$worktree/"
+cp -R "$repo/website/index.html" "$repo/website/view.html" "$repo/website/reports" "$worktree/"
 touch "$worktree/.nojekyll"   # serve paths verbatim; skip the Jekyll build
 
 git -C "$worktree" add -A

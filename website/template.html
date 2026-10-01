@@ -3,239 +3,464 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Neural trajectories with PCA: EEG and MEG results</title>
-<meta name="description" content="Interactive results for a tutorial on PCA-based trajectory analysis of EEG and MEG.">
+<title>From Signals to Trajectories: a primer on low-dimensional dynamics in EEG and MEG</title>
+<meta name="description" content="Companion site for the primer: interactive reports, tutorial notebooks and code for PCA-based trajectory analysis of human EEG and MEG.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<script>
+  // Light or dark: the saved choice, or else what the system prefers.
+  (function () {
+    let theme = null;
+    try { theme = localStorage.getItem('theme'); } catch (error) {}
+    if (theme !== 'light' && theme !== 'dark')
+      theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
 <style>
+  /* The three colours are the ones the figures use for the three conditions. */
   :root {
-    --bg: #fdfcfa;
+    --blue: #0072b2;
+    --orange: #d55e00;
+    --green: #009e73;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+
+    /* light */
+    --bg: #ffffff;
+    --band: #f4f6f8;
+    --card: #ffffff;
+    --ink: #17202b;
+    --soft: #5b6775;
+    --line: #dfe4ea;
+    --link: #0072b2;
+    --edge: #b8c2ce;                       /* outlines of buttons */
+    --top: rgba(255, 255, 255, .9);
+    --cover:
+      radial-gradient(60rem 28rem at 88% -10%, rgba(0, 114, 178, .10), transparent 65%),
+      radial-gradient(48rem 26rem at -5% 115%, rgba(0, 158, 115, .08), transparent 65%),
+      #ffffff;
     --panel: #ffffff;
-    --ink: #1c1b19;
-    --soft: #5d5a55;
-    --line: #e4e0d8;
-    --accent: #8a3324;
-    --accent-bg: #f6ece8;
-    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --width: 1040px;
+    --code: #17202b;
+    --boost: none;                         /* line colours as they are */
+    --shadow: 0 6px 20px rgba(14, 23, 34, .09);
+    color-scheme: light;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #171614;
-      --panel: #1f1e1b;
-      --ink: #ece9e3;
-      --soft: #a8a39a;
-      --line: #35332e;
-      --accent: #e39a86;
-      --accent-bg: #2b2220;
-    }
+  :root[data-theme="dark"] {
+    --bg: #0a0f15;
+    --band: #0f161f;
+    --card: #141c27;
+    --ink: #e9eef4;
+    --soft: #98a7b8;
+    --line: #232f3e;
+    --link: #6cc0f5;
+    --edge: #4a5b70;
+    --top: rgba(10, 15, 21, .88);
+    --cover:
+      radial-gradient(60rem 30rem at 88% -15%, rgba(0, 114, 178, .30), transparent 65%),
+      radial-gradient(48rem 28rem at -5% 120%, rgba(0, 158, 115, .16), transparent 65%),
+      radial-gradient(40rem 22rem at 45% 125%, rgba(213, 94, 0, .10), transparent 70%),
+      #0a0f15;
+    --panel: rgba(20, 28, 39, .78);
+    --code: #141c27;
+    --boost: brightness(1.45) saturate(1.05);   /* the same colours, readable on dark */
+    --shadow: 0 8px 26px rgba(0, 0, 0, .5);
+    color-scheme: dark;
   }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: var(--sans);
-    font-size: 17px;
-    line-height: 1.6;
-  }
-  .wrap { max-width: var(--width); margin: 0 auto; padding: 0 1.25rem; }
-  a { color: var(--accent); text-underline-offset: 3px; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(--sans); }
+  a { color: var(--link); text-underline-offset: 3px; text-decoration-thickness: 1px; }
   h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.2; margin: 0; }
-  h2 { font-size: 1.7rem; margin-bottom: .4rem; }
-  section { padding: 3.5rem 0 0; scroll-margin-top: 3.5rem; }
-  .intro { color: var(--soft); max-width: 42rem; margin: 0 0 1.75rem; }
+  p { margin: 0 0 1rem; }
+  .wide { max-width: 1140px; margin: 0 auto; padding-left: 1.5rem; padding-right: 1.5rem; }
+  .stripe { height: 4px; background: linear-gradient(90deg, var(--blue) 0 33.3%, var(--orange) 33.3% 66.6%, var(--green) 66.6%); }
 
-  /* top bar */
+  /* bar at the top */
   .top {
-    position: sticky; top: 0; z-index: 5;
-    background: var(--bg);
-    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 10; background: var(--top);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
   }
-  .top .wrap { display: flex; align-items: center; gap: 1.5rem; min-height: 3.2rem; }
-  .top .name { font-family: var(--serif); font-weight: 600; margin-right: auto; color: var(--ink); text-decoration: none; }
-  .top nav { display: flex; gap: 1.25rem; font-size: .92rem; }
-  .top nav a { color: var(--soft); text-decoration: none; }
-  .top nav a:hover { color: var(--accent); }
-
-  /* opening */
-  .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 3rem; align-items: center; padding-top: 3.5rem; }
-  .hero > div:only-child { grid-column: 1 / -1; max-width: 44rem; }
-  .hero h1 { font-size: 2.6rem; letter-spacing: -.01em; }
-  .hero .sub { font-family: var(--serif); font-size: 1.25rem; color: var(--soft); margin: .5rem 0 1.4rem; }
-  .hero p { margin: 0 0 1rem; }
-  .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.6rem; }
-  .button {
-    display: inline-block; padding: .6rem 1.1rem;
-    border: 1px solid var(--accent); border-radius: 4px;
-    color: var(--accent); text-decoration: none; font-size: .95rem; font-weight: 500;
+  .top .wide { display: flex; align-items: center; gap: 1.5rem; min-height: 3.1rem; }
+  .top .name { font: 600 1.02rem var(--serif); color: var(--ink); text-decoration: none; margin-right: auto; white-space: nowrap; }
+  .top nav { display: flex; align-items: center; gap: 1.4rem; font-size: .92rem; }
+  .top nav a { color: var(--soft); text-decoration: none; white-space: nowrap; }
+  .top nav a:hover { color: var(--ink); }
+  .theme {
+    padding: .18rem .7rem; border: 1px solid var(--edge); border-radius: 6px;
+    background: transparent; color: var(--ink); font: 600 .82rem var(--sans); cursor: pointer; white-space: nowrap;
   }
-  .button.main { background: var(--accent); color: var(--bg); }
-  .button:hover { filter: brightness(1.1); }
+  .theme:hover { border-color: var(--ink); }
 
+  /* cover */
+  .cover { background: var(--cover); }
+  .cover .wide { display: grid; grid-template-columns: 1fr 1.05fr; gap: 3rem; align-items: center; padding-top: 3rem; padding-bottom: 3rem; }
+  .kicker { font-size: .82rem; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--soft); margin-bottom: 1rem; }
+  .cover h1 { font-size: clamp(1.9rem, 3.5vw, 2.85rem); letter-spacing: -.012em; }
+  .cover h1 span { display: block; font-weight: 400; font-size: .62em; line-height: 1.3; margin-top: .7rem; opacity: .85; }
+  .authors { margin: 1.5rem 0 1.7rem; color: var(--soft); font-size: 1rem; }
+  .buttons { display: flex; flex-wrap: wrap; gap: .6rem; }
+  .buttons a {
+    padding: .55rem 1.25rem; border: 1px solid var(--edge); border-radius: 6px;
+    color: var(--ink); font-size: .95rem; font-weight: 600; text-decoration: none;
+  }
+  .buttons a:hover { border-color: var(--ink); }
+  .buttons a.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  .buttons a.primary:hover { opacity: .88; }
+
+  /* shared by every plot on the page */
+  svg path { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  svg path:not(.ref), svg circle, .key li::before { filter: var(--boost); }
+  svg path.dashed { stroke-dasharray: 5 4; }
+  svg path.ref { stroke: var(--line); stroke-width: 1; }
+  svg circle { fill: var(--c); }
+  svg text { fill: var(--soft); font: 12px var(--sans); }
   figure { margin: 0; }
-  .traj { width: 100%; height: auto; display: block; }
-  .traj path { fill: none; stroke: var(--c); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
-  .traj path.axis { stroke: var(--line); stroke-width: 1; animation: none; stroke-dasharray: none; }
-  .traj circle { fill: var(--c); }
-  .traj circle.start { fill: var(--ink); }
-  .traj text { fill: var(--soft); font-family: var(--sans); font-size: 12px; }
-  @media (prefers-reduced-motion: no-preference) {
-    .traj path { stroke-dasharray: 1; animation: draw 3.5s ease-out .3s backwards; }
-    @keyframes draw { from { stroke-dashoffset: 1; } }
+  .key { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .1rem 1rem; font-size: .8rem; color: var(--soft); }
+  .key li::before {
+    content: ""; display: inline-block; width: 1.2rem; margin-right: .4rem; vertical-align: middle;
+    border-top: 3px solid var(--c);
   }
-  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .85rem; margin: .4rem 0 .5rem; padding: 0; list-style: none; }
-  .key li::before { content: ""; display: inline-block; width: 1.1rem; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: .4rem; background: var(--c); }
-  figcaption { font-size: .85rem; color: var(--soft); line-height: 1.5; }
+  .key li.dashed::before { border-top-style: dashed; }
 
-  /* the four reports to start with */
-  .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
-  .card {
-    display: block; padding: 1.3rem 1.4rem 1.2rem;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-    color: inherit; text-decoration: none;
+  /* the trajectory you can play */
+  .player { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem 1.1rem; box-shadow: var(--shadow); }
+  .player svg { display: block; width: 100%; height: auto; }
+  .player path.ghost { opacity: .22; stroke-width: 1.5; }
+  .player path.live { stroke-width: 3; }
+  .controls { display: flex; align-items: center; gap: .9rem; margin: .4rem 0 .6rem; }
+  .controls button {
+    min-width: 4.6rem; padding: .3rem .8rem; border: 1px solid var(--edge); border-radius: 6px;
+    background: transparent; color: var(--ink); font: 600 .9rem var(--sans); cursor: pointer;
   }
-  .card:hover { border-color: var(--accent); }
-  .card .where { font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); }
-  .card h3 { font-size: 1.25rem; margin: .25rem 0 .45rem; }
-  .card p { margin: 0 0 .8rem; font-size: .95rem; color: var(--soft); }
-  .card .go { font-size: .9rem; color: var(--accent); font-weight: 500; }
+  .controls button:hover { border-color: var(--ink); }
+  .controls input { flex: 1; accent-color: var(--ink); }
+  .controls output { min-width: 13.5rem; font-size: .9rem; font-variant-numeric: tabular-nums; }
+  .player .key { font-size: .9rem; margin-bottom: .55rem; color: var(--ink); }
+  .player figcaption { color: var(--soft); font-size: .84rem; line-height: 1.45; }
+
+  /* sections: heading on the left, content on the right */
+  section { padding: 4rem 0; scroll-margin-top: 3rem; }
+  section.band { background: var(--band); }
+  .split { display: grid; grid-template-columns: 15rem 1fr; gap: 3rem; }
+  .split > header { align-self: start; position: sticky; top: 4.5rem; }
+  h2 { font-size: 1.75rem; }
+  h2::after { content: ""; display: block; width: 2.5rem; height: 3px; margin-top: .7rem; background: var(--orange); }
+  .split > header p { color: var(--soft); font-size: .93rem; margin: .9rem 0 0; }
+
+  .prose { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; }
+  .prose h3 { font-size: 1.2rem; margin-bottom: .5rem; }
+  .prose p { font-size: 1rem; }
+
+  /* results shown in the paper */
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  .result {
+    display: block; padding: 1rem 1.1rem 1.1rem; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; color: inherit; text-decoration: none;
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+  }
+  .result:hover { border-color: var(--link); box-shadow: var(--shadow); transform: translateY(-2px); }
+  .result .plot { display: block; width: 100%; height: auto; background: var(--band); border-radius: 6px; margin-bottom: .5rem; }
+  .result .shows { color: var(--soft); font-size: .78rem; margin: .25rem 0 .9rem; }
+  .figure-label { display: inline-block; font-size: .76rem; font-weight: 600; letter-spacing: .03em; color: #fff; background: var(--blue); border-radius: 4px; padding: .05rem .5rem; }
+  .result h3 { font-size: 1.2rem; margin: .5rem 0 .3rem; }
+  .result p { font-size: .93rem; color: var(--soft); margin: 0 0 .6rem; }
+  .result .open { font-size: .93rem; font-weight: 600; color: var(--link); }
+  .result .open::after, .links a::after { content: " \2192"; display: inline-block; margin-left: .25rem; }
 
   /* every report, by dataset */
-  .dataset { margin-top: 2.25rem; }
+  .dataset { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1.4rem 1.5rem .4rem; scroll-margin-top: 4rem; }
+  .dataset + .dataset { margin-top: 1.5rem; }
   .dataset h3 { font-size: 1.3rem; }
-  .dataset .about { color: var(--soft); font-size: .95rem; margin: .3rem 0 1rem; max-width: 46rem; }
-  .picker { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .4rem; font-size: .9rem; }
-  .picker .ask { color: var(--soft); margin-right: .3rem; }
+  .about { color: var(--soft); margin: .3rem 0 1rem; font-size: .95rem; }
+  .picker { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .9rem; }
+  .picker .ask { font-weight: 600; margin-right: .4rem; }
   .picker button {
-    padding: .35rem .8rem; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+    padding: .25rem .8rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--ink); font: inherit; cursor: pointer;
   }
-  .picker button:hover { border-color: var(--accent); }
-  .picker button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-  .picker-note { font-size: .82rem; color: var(--soft); margin: 0 0 1rem; }
+  .picker button:hover { border-color: var(--blue); }
+  .picker button[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .picker-note { color: var(--soft); font-size: .84rem; margin: .5rem 0 1rem; }
   .rows { border-top: 1px solid var(--line); }
-  .row { display: grid; grid-template-columns: 15rem 1fr; gap: .4rem 2rem; padding: 1.1rem 0; border-bottom: 1px solid var(--line); }
-  .row h4 { margin: 0; font-size: 1rem; font-weight: 600; }
-  .row p { margin: 0 0 .5rem; font-size: .93rem; color: var(--soft); }
-  .row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; font-size: .95rem; }
-  .row li[hidden] { display: none; }
+  .row { display: grid; grid-template-columns: 13.5rem 1fr; gap: .3rem 1.5rem; padding: .95rem 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row h4 { margin: 0; font: 600 1rem var(--sans); }
+  .row p { margin: 0 0 .4rem; font-size: .93rem; color: var(--soft); }
+  .links { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .2rem 1.4rem; font-size: .95rem; }
+  .links li[hidden] { display: none; }
+  .links a { text-decoration: none; font-weight: 600; }
+  .links a:hover { text-decoration: underline; }
 
-  /* notebooks */
-  ol.notebooks { margin: 0; padding: 0; list-style: none; counter-reset: nb; border-top: 1px solid var(--line); }
-  ol.notebooks li { counter-increment: nb; display: grid; grid-template-columns: 2rem 1fr; padding: .85rem 0; border-bottom: 1px solid var(--line); }
-  ol.notebooks li::before { content: counter(nb); font-family: var(--serif); font-size: 1.2rem; color: var(--soft); }
-  ol.notebooks p { margin: .1rem 0 0; font-size: .93rem; color: var(--soft); }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em; }
+  /* the code */
+  .parts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin-bottom: 1.5rem; }
+  .parts div { background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: 8px; padding: 1.1rem 1.2rem; }
+  .parts h3 { font-size: 1.12rem; margin-bottom: .35rem; }
+  .parts p { font-size: .93rem; color: var(--soft); margin: 0; }
+  .table { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .3rem 1.2rem; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+  th, td { text-align: left; padding: .65rem .9rem .65rem 0; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--soft); font-weight: 600; border-top: 0; }
+  td:first-child { width: 1.8rem; color: var(--soft); font-family: var(--serif); }
+  td:nth-child(2) { font-weight: 600; }
+  td:nth-child(2) a { text-decoration: none; }
+  td:nth-child(2) a:hover { text-decoration: underline; }
+  td:last-child { white-space: nowrap; color: var(--soft); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .84em; }
 
-  footer { margin-top: 4rem; padding: 1.5rem 0 3rem; border-top: 1px solid var(--line); color: var(--soft); font-size: .85rem; }
-  footer p { margin: 0 0 .5rem; max-width: 46rem; }
+  .cite { position: relative; }
+  pre { background: var(--code); color: #dbe4ee; border: 1px solid var(--line); border-radius: 10px; padding: 1.2rem 1.3rem; overflow-x: auto; line-height: 1.55; margin: 0; }
+  .copy {
+    position: absolute; top: .7rem; right: .7rem; padding: .2rem .7rem; border: 1px solid #5c6e83;
+    border-radius: 6px; background: transparent; color: #fff; font: 600 .8rem var(--sans); cursor: pointer;
+  }
+  .copy:hover { border-color: #fff; }
 
-  @media (max-width: 800px) {
-    .hero { grid-template-columns: 1fr; gap: 2rem; padding-top: 2.25rem; }
-    .hero h1 { font-size: 2rem; }
-    .cards { grid-template-columns: 1fr; }
+  footer { background: var(--band); color: var(--soft); font-size: .88rem; }
+  footer .wide { padding-top: 1.75rem; padding-bottom: 2.25rem; }
+  footer p { margin: 0 0 .35rem; }
+
+  @media (max-width: 980px) {
+    .cover .wide { grid-template-columns: 1fr; gap: 2rem; padding-top: 2.25rem; }
+    .split { grid-template-columns: 1fr; gap: 1.5rem; }
+    .split > header { position: static; }
+    section { padding: 3rem 0; }
+  }
+  @media (max-width: 700px) {
+    .results, .parts, .prose { grid-template-columns: 1fr; }
     .row { grid-template-columns: 1fr; }
-    .top nav a.extra { display: none; }
+    .top .name { display: none; }
+    .top nav { width: 100%; justify-content: space-between; gap: .6rem; font-size: .85rem; }
+    .controls { flex-wrap: wrap; }
+    .controls output { min-width: 100%; order: 3; }
+    td:last-child { white-space: normal; }
+    .dataset { padding: 1.1rem 1rem .2rem; }
   }
 </style>
 </head>
 <body>
 
 <div class="top">
-  <div class="wrap">
-    <a class="name" href="#top">Neural trajectories with PCA</a>
+  <div class="wide">
+    <a class="name" href="#top">From Signals to Trajectories</a>
     <nav>
-      <a href="#start">Start here</a>
+      <a class="extra" href="#about">About</a>
+      <a href="#paper">Paper results</a>
       <a href="#reports">All reports</a>
-      <a class="extra" href="#notebooks">Notebooks</a>
-      <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">GitHub</a>
+      <a class="extra" href="#code">Code</a>
+      <a class="extra" href="#cite">Cite</a>
+      <button type="button" class="theme" aria-label="Switch between light and dark background"></button>
     </nav>
   </div>
 </div>
 
-<main class="wrap" id="top">
-
-<div class="hero">
-  <div>
-    <h1>A primer on low-dimensional neural dynamics</h1>
-    <p class="sub">PCA-based trajectory analysis for EEG and MEG</p>
-    <p>
-      An evoked response is usually drawn as one curve per sensor. The sensors don't change
-      independently, though. The whole pattern moves together, and PCA lets you follow that
-      movement as a path through a few dimensions.
-    </p>
-    <p>
-      This site holds the results that go with our tutorial, on two open datasets. The figures
-      are interactive, so you can rotate them, zoom in, and check the numbers behind them.
-    </p>
-    <div class="actions">
-      <a class="button main" href="#start">See the main results</a>
-      <a class="button" href="#notebooks">Run the notebooks</a>
+<header class="cover" id="top">
+  <div class="wide">
+    <div>
+      <p class="kicker">Companion site</p>
+      <h1>From Signals to Trajectories
+        <span>A primer on low&#8209;dimensional dynamics in human EEG and MEG</span></h1>
+      <p class="authors">
+        Vanessa Hadid, Hamza Abdelhedi, Annalisa Pascarella, Sara A. Solla, Paul Cisek, Karim Jerbi
+      </p>
+      <nav class="buttons">
+        <a class="primary" href="https://arxiv.org/abs/2609.32315">Preprint</a>
+        <a href="view.html">Reports</a>
+        <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">Code</a>
+      </nav>
     </div>
+    <!-- HERO -->
   </div>
+  <div class="stripe"></div>
+</header>
 
-<!-- HERO -->
-</div>
+<main>
+  <section id="about">
+    <div class="wide split">
+      <header><h2>About</h2></header>
+      <div class="prose">
+        <div>
+          <h3>The primer</h3>
+          <p>
+            Neural activity can be described as a point moving through a high-dimensional
+            state space. This view has shaped systems neuroscience through recordings of
+            neuronal populations, but it is still little used with non-invasive human
+            recordings such as EEG and MEG.
+          </p>
+          <p>
+            The primer presents trajectory analysis based on principal component analysis
+            (PCA) as an accessible way in. It explains how to organise EEG or MEG activity
+            into neural states, project them onto a few components, and read the result as
+            trajectories that show how distributed activity evolves over time. It also
+            covers the limits of PCA and the problems specific to EEG and MEG: spatial
+            mixing, sensitivity to preprocessing, validation and overinterpretation.
+            <a href="https://arxiv.org/abs/2609.32315">Read the preprint on arXiv.</a>
+          </p>
+        </div>
+        <div>
+          <h3>What this site is for</h3>
+          <p>
+            The paper works through two examples: motor execution and imagery in EEG, and
+            face perception in MEG. Every analysis behind them was run on the full cohort,
+            and each run wrote an interactive report with its figures, tables, statistics
+            and settings. This site publishes those reports.
+          </p>
+          <p>
+            Use it to look closer at a figure from the paper, to check the numbers behind
+            it, or to see the analyses that did not fit in the paper: other sensor
+            selections, other contrasts, and a comparison of PCA with nonlinear methods.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-<section id="start">
-  <h2>Start here</h2>
-  <p class="intro">
-    Four reports cover the main results. Each one walks through an analysis step by step, with
-    the figures, the tables and the settings of the run.
-  </p>
-  <div class="cards">
-<!-- FEATURED -->
-  </div>
-</section>
+  <section class="band" id="paper">
+    <div class="wide split">
+      <header>
+        <h2>Results in the paper</h2>
+        <p>The reports behind Figures 2 and 3. The plots are drawn from the reports themselves.</p>
+      </header>
+      <div class="results">
+<!-- PAPER -->
+      </div>
+    </div>
+  </section>
 
-<section id="reports">
-  <h2>All reports</h2>
-  <p class="intro">
-    Everything we ran, by dataset. Reports are single HTML files of 5 to 20 MB, so give them a
-    few seconds to load.
-  </p>
-<!-- REPORTS -->
-</section>
+  <section id="reports">
+    <div class="wide split">
+      <header>
+        <h2>All reports</h2>
+        <p>
+          Everything that was run, by dataset. Reports open in a viewer with a bar on top for
+          moving between analyses, contrasts and sensor selections. They are files of 5 to
+          20 MB, so give them a few seconds to load.
+        </p>
+      </header>
+      <div>
+  <!-- REPORTS -->
+      </div>
+    </div>
+  </section>
 
-<section id="notebooks">
-  <h2>Run it yourself</h2>
-  <p class="intro">
-    Six notebooks, meant to be read in this order. They use a handful of participants so they
-    finish on a laptop. Each has a script in <code>scripts/</code> that runs the same analysis
-    on everyone and writes the reports above.
-    <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg#readme">Installation notes are in the README.</a>
-  </p>
-  <ol class="notebooks">
-    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_main.ipynb">EEG: the core workflow</a>
-      <p>Fit PCA, plot trajectories for executed and imagined hand movements, and measure how they differ.</p></div></li>
-    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_nonlinear.ipynb">EEG: PCA next to UMAP, PHATE and Isomap</a>
-      <p>The same data through three nonlinear methods, and how to compare them fairly.</p></div></li>
-    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_decoding.ipynb">EEG: decoding across participants</a>
-      <p>Train on some people and test on someone new, from sensors and from aligned components.</p></div></li>
-    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_main.ipynb">MEG: faces in one shared space</a>
-      <p>Famous, unfamiliar and scrambled images in a single PCA space, with the two planned contrasts.</p></div></li>
-    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_spectral_envelopes.ipynb">MEG: frequency bands</a>
-      <p>Trajectories of alpha, beta and low-gamma power instead of the broadband signal.</p></div></li>
-    <li><div><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_decoding.ipynb">MEG: decoding across participants</a>
-      <p>The decoding workflow again, this time on MEG.</p></div></li>
-  </ol>
-</section>
+  <section class="band" id="code">
+    <div class="wide split">
+      <header>
+        <h2>Code and tutorials</h2>
+        <p>
+          Everything is in one
+          <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">repository</a>.
+          <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg#readme">How to install and run it</a>
+        </p>
+      </header>
+      <div>
+        <div class="parts">
+          <div style="--c: var(--blue)">
+            <h3>Notebooks</h3>
+            <p>
+              Six tutorials that explain each step and the choices behind it. They run on a
+              few participants, so they finish on a laptop. Start here to learn the method.
+            </p>
+          </div>
+          <div style="--c: var(--orange)">
+            <h3>Scripts</h3>
+            <p>
+              One script per notebook, in <code>scripts/</code>. It runs the same workflow
+              on the full cohort and writes the tables, the figures and the report you see
+              on this site.
+            </p>
+          </div>
+          <div style="--c: var(--green)">
+            <h3>coco-pipe</h3>
+            <p>
+              The <a href="https://github.com/BabaSanfour/coco-pipe">library</a> underneath:
+              PCA and other reducers, alignment between participants, decoding, and the
+              report format. Use it on your own data.
+            </p>
+          </div>
+        </div>
 
-<footer>
-  <p>
-    Data: <a href="https://physionet.org/content/eegmmidb/1.0.0/">PhysioNet EEG Motor Movement/Imagery</a>
-    and <a href="https://openneuro.org/datasets/ds000117">Wakeman &amp; Henson faces (OpenNeuro ds000117)</a>.
-    Code: <a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg">thecocolab/pca-neural-trajectories-eeg-meg</a>.
-  </p>
-  <p>Last updated <!-- BUILT -->.</p>
-</footer>
+        <div class="table">
+        <table>
+          <thead><tr><th></th><th>Notebook</th><th>What it covers</th><th>In the paper</th></tr></thead>
+          <tbody>
+            <tr><td>1</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_main.ipynb">EEG: the core workflow</a></td>
+              <td>Fit PCA, plot trajectories for executed and imagined hand movements, and measure how they differ.</td>
+              <td>Figure 2</td></tr>
+            <tr><td>2</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_nonlinear.ipynb">EEG: PCA next to UMAP, PHATE and Isomap</a></td>
+              <td>The same data through three nonlinear methods.</td>
+              <td>Goes beyond it</td></tr>
+            <tr><td>3</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_eegbci_decoding.ipynb">EEG: decoding across participants</a></td>
+              <td>Train on some people and test on someone new, from sensors and from aligned components.</td>
+              <td>Follows Figure 2</td></tr>
+            <tr><td>4</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_main.ipynb">MEG: faces in one shared space</a></td>
+              <td>Famous, unfamiliar and scrambled faces in a single PCA space.</td>
+              <td>Figure 3a–b</td></tr>
+            <tr><td>5</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_spectral_envelopes.ipynb">MEG: frequency bands</a></td>
+              <td>Trajectories of alpha power, extended to beta and low gamma.</td>
+              <td>Figure 3c–d</td></tr>
+            <tr><td>6</td>
+              <td><a href="https://github.com/thecocolab/pca-neural-trajectories-eeg-meg/blob/main/tutorials/tutorial_megfaces_decoding.ipynb">MEG: decoding across participants</a></td>
+              <td>Cross-participant decoding and alignment.</td>
+              <td>Figure 3e–f</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+  </section>
 
+  <section id="cite">
+    <div class="wide split">
+      <header><h2>Cite</h2></header>
+      <div class="cite">
+        <button type="button" class="copy">Copy</button>
+<pre>@article{hadid2026signals,
+  title   = {From Signals to Trajectories: A Primer on Low-Dimensional
+             Dynamics in Human EEG and MEG},
+  author  = {Hadid, Vanessa and Abdelhedi, Hamza and Pascarella, Annalisa
+             and Solla, Sara A. and Cisek, Paul and Jerbi, Karim},
+  journal = {arXiv preprint arXiv:2609.32315},
+  year    = {2026}
+}</pre>
+      </div>
+    </div>
+  </section>
 </main>
 
+<footer>
+  <div class="stripe"></div>
+  <div class="wide">
+    <p>
+      Data: <a href="https://physionet.org/content/eegmmidb/1.0.0/">PhysioNet EEG Motor Movement/Imagery Database</a>
+      and the <a href="https://openneuro.org/datasets/ds000117">Wakeman–Henson multimodal dataset (OpenNeuro ds000117)</a>.
+      Neither is redistributed here.
+    </p>
+    <p>Last updated <!-- BUILT -->.</p>
+  </div>
+</footer>
+
 <script>
-  // Sensor picker: point every link in the dataset at the chosen sensor selection.
+  // Light / dark switch. The choice is remembered and shared with the report viewer.
+  document.querySelectorAll('.theme').forEach(button => {
+    const root = document.documentElement;
+    const label = () => { button.textContent = root.dataset.theme === 'dark' ? 'Light' : 'Dark'; };
+    button.addEventListener('click', () => {
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('theme', root.dataset.theme); } catch (error) {}
+      label();
+    });
+    label();
+  });
+
+  // Sensor picker: point the links of a dataset at the chosen sensor selection.
   document.querySelectorAll('.picker').forEach(picker => {
     const links = picker.closest('.dataset').querySelectorAll('a[data-by-sensor]');
     picker.querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
@@ -247,6 +472,56 @@
         if (href) link.href = href;
       });
     }));
+  });
+
+  // Copy the citation.
+  document.querySelectorAll('.copy').forEach(button => button.addEventListener('click', () => {
+    navigator.clipboard.writeText(button.parentElement.querySelector('pre').textContent)
+      .then(() => { button.textContent = 'Copied'; setTimeout(() => { button.textContent = 'Copy'; }, 1500); });
+  }));
+
+  // Trajectory player: draw each path up to the chosen time.
+  document.querySelectorAll('.player').forEach(player => {
+    const data = JSON.parse(player.querySelector('.player-data').textContent);
+    const lines = player.querySelectorAll('path.live');
+    const dots = player.querySelectorAll('circle');
+    const slider = player.querySelector('input');
+    const readout = player.querySelector('output');
+    const button = player.querySelector('.play');
+    const last = data.ms.length - 1;
+    let frame = null;
+
+    function show(index) {
+      data.paths.forEach((points, k) => {
+        lines[k].setAttribute('d', 'M' + points.slice(0, index + 1).join(' L'));
+        const [x, y] = points[index].split(' ');
+        dots[k].setAttribute('cx', x);
+        dots[k].setAttribute('cy', y);
+      });
+      const ms = data.ms[index];
+      readout.textContent = ms < 0 ? `${-ms} ms before the image` : `${ms} ms after the image appears`;
+      slider.value = index;
+    }
+    function stop() {
+      cancelAnimationFrame(frame);
+      frame = null;
+      button.textContent = 'Play';
+    }
+    function play() {
+      const began = performance.now();
+      button.textContent = 'Pause';
+      const step = now => {
+        const index = Math.min(last, Math.round((now - began) / 9000 * last));
+        show(index);
+        frame = index < last ? requestAnimationFrame(step) : (stop(), null);
+      };
+      frame = requestAnimationFrame(step);
+    }
+
+    button.addEventListener('click', () => frame ? stop() : play());
+    slider.addEventListener('input', () => { stop(); show(Number(slider.value)); });
+    show(last);
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) play();
   });
 </script>
 </body>
