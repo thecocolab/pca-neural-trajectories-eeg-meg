@@ -22,6 +22,14 @@ source .venv/bin/activate
 pip install -e ".[test,meg]"
 ```
 
+For the MEG notebooks, also install the mne-bids branch that reads saved FIF epochs.
+This step goes away once [mne-bids#1679](https://github.com/mne-tools/mne-bids/pull/1679)
+is released.
+
+```bash
+pip install --no-deps "mne-bids @ git+https://github.com/BabaSanfour/mne-bids@read-epochs-fif"
+```
+
 Most of the analysis code lives in [coco-pipe](https://github.com/BabaSanfour/coco-pipe)
 ([documentation](https://babasanfour.github.io/coco-pipe/)), which is installed from
 [PyPI](https://pypi.org/project/coco-pipe/) as a dependency. This repository adds the
