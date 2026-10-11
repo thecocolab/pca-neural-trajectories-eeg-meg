@@ -22,9 +22,10 @@ source .venv/bin/activate
 pip install -e ".[test,meg]"
 ```
 
-Most of the analysis code lives in [coco-pipe](https://github.com/BabaSanfour/coco-pipe),
-which is installed as a dependency. This repository adds the data loading, the
-notebooks and the scripts.
+Most of the analysis code lives in [coco-pipe](https://github.com/BabaSanfour/coco-pipe)
+([documentation](https://babasanfour.github.io/coco-pipe/)), which is installed from
+[PyPI](https://pypi.org/project/coco-pipe/) as a dependency. This repository adds the
+data loading, the notebooks and the scripts.
 
 ## The notebooks
 

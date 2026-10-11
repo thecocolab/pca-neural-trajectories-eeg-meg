@@ -25,7 +25,10 @@ def _coco_pipe_root() -> Path | None:
     spec = importlib.util.find_spec("coco_pipe")
     if spec is None or spec.origin is None:
         return None
-    return Path(spec.origin).resolve().parent.parent
+    root = Path(spec.origin).resolve().parent.parent
+    # A wheel in a virtual environment inside this repository would otherwise
+    # report this repository's commit.
+    return root if (root / ".git").exists() else None
 
 
 def _json_default(value: Any) -> Any:

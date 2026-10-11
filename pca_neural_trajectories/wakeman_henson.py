@@ -531,6 +531,7 @@ def _load_wakeman_henson_container(
         resolved = [str(s).removeprefix("sub-") for s in subjects]
     resolved = sorted(resolved)
 
+    event_id = {BIDS_NAMES[c]: c for c in selected}
     dataset = BIDSDataset(
         root=Path(derivatives_root),
         task=TASK,
@@ -538,10 +539,17 @@ def _load_wakeman_henson_container(
         datatype=DATATYPE,
         suffix="epo",
         mode="load_existing",
-        event_id={BIDS_NAMES[c]: c for c in selected},
+        event_id=event_id,
         subjects=resolved,
+        dtype="float64",
     )
     container = dataset.load()
+    # coco-pipe numbers the events itself (see meta["event_id"]); restore our codes.
+    names = {code: name for name, code in container.meta["event_id"].items()}
+    container = container.replace(
+        y=np.asarray([event_id[names[code]] for code in container.y]),
+        meta={**container.meta, "event_id": event_id},
+    )
 
     if vectorview_selections is not None:
         import mne
@@ -577,12 +585,14 @@ def _load_wakeman_henson_container(
             raise ValueError(
                 f"notch_freq must lie between 0 and Nyquist ({sfreq / 2:g} Hz)."
             )
-        container.X = mne.filter.notch_filter(
-            np.asarray(container.X),
-            Fs=sfreq,
-            freqs=notch_freq,
-            method="iir",
-            verbose=False,
+        container = container.replace(
+            X=mne.filter.notch_filter(
+                np.asarray(container.X),
+                Fs=sfreq,
+                freqs=notch_freq,
+                method="iir",
+                verbose=False,
+            )
         )
         container.meta["notch_freq_hz"] = float(notch_freq)
 
@@ -592,8 +602,12 @@ def _load_wakeman_henson_container(
             f"Trial metadata ({len(metadata)} rows) does not match the loaded epochs "
             f"({container.X.shape[0]}). The derivatives root and the epochs files disagree."
         )
-    for column in metadata.columns:
-        container.coords[column] = metadata[column].to_numpy()
+    container = container.replace(
+        coords={
+            **container.coords,
+            **{column: metadata[column].to_numpy() for column in metadata.columns},
+        }
+    )
 
     container.meta["sensor_set"] = sensor_set
     container.meta["n_sensors"] = int(container.X.shape[1])

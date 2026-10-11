@@ -325,9 +325,12 @@ def run_main_analysis(
     time_mask = (times_full >= analysis_window[0] - 1e-8) & (
         times_full <= analysis_window[1] + 1e-8
     )
-    container = container.isel(time=time_mask).zscore(
-        dim=("obs", "time"), eps=1e-5
-    )
+    container = container.isel(time=time_mask)
+    # Z-score each channel across trials and time.
+    X = np.asarray(container.X)
+    mean = X.mean(axis=(0, 2), keepdims=True)
+    std = X.std(axis=(0, 2), keepdims=True)
+    container = container.replace(X=(X - mean) / (std + 1e-5))
     times = np.asarray(container.coords["time"])
     subject_ids = np.asarray(container.coords["subject"])
     trial_labels = np.asarray(container.y).astype(int)
@@ -349,11 +352,12 @@ def run_main_analysis(
     )
     container_plot_erp = container.aggregate(by=plot_groups, stats="mean")
     aggregate_keys = np.asarray(container_plot_erp.coords["obs"]).astype(str)
-    container_plot_erp.y = np.asarray(
-        [int(key.split("|")[1]) for key in aggregate_keys]
-    )
-    container_plot_erp.coords["subject"] = np.asarray(
-        [key.split("|")[0] for key in aggregate_keys]
+    container_plot_erp = container_plot_erp.replace(
+        y=np.asarray([int(key.split("|")[1]) for key in aggregate_keys]),
+        coords={
+            **container_plot_erp.coords,
+            "subject": np.asarray([key.split("|")[0] for key in aggregate_keys]),
+        },
     )
 
     container_plot_pooled_trials = container.stack(
@@ -443,10 +447,12 @@ def run_main_analysis(
         new_dim_name="component",
     )
     container_traj_erp = container_pc_erp.unstack("obs")
-    container_traj_trials.X = _baseline_scores(
-        container_traj_trials.X, times, pc_names
+    container_traj_trials = container_traj_trials.replace(
+        X=_baseline_scores(container_traj_trials.X, times, pc_names)
     )
-    container_traj_erp.X = _baseline_scores(container_traj_erp.X, times, pc_names)
+    container_traj_erp = container_traj_erp.replace(
+        X=_baseline_scores(container_traj_erp.X, times, pc_names)
+    )
 
     # --------------------------------------------------------------------- Step 7
     container_traj_trials_agg = container_traj_trials.aggregate(

@@ -10,12 +10,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "autoreject>=0.4",
-    "coco-pipe[eeg,decoding,neighbor]>=0.0.1",
+    "coco-pipe[eeg,decoding,neighbor]>=0.0.2",
     "ipywidgets",
     "jupyterlab",
     "kaleido",
-    "mne>=1.9",
-    "mne-bids>=0.18",
+    "mne>=1.13",
+    "mne-bids>=0.20",
     "mne-icalabel",
     "nbclient>=0.10",
     "nbformat>=5.10",

@@ -190,7 +190,7 @@ def setup_data_bids(
 
             raw = mne.io.read_raw_edf(fname, preload=True, verbose=False)
             mne.datasets.eegbci.standardize(raw)
-            raw.set_montage(mne.channels.make_standard_montage("standard_1005"), verbose=False)
+            raw.set_montage(mne.channels.make_standard_montage("colin27_1005"), verbose=False)
             raw.pick_types(eeg=True, verbose=False)
 
             # Interpolate bad channels before referencing/ICA so a bad sensor
@@ -303,8 +303,15 @@ def load_eegbci_container(
         tmin=tmin,
         tmax=tmax,
         baseline=baseline,
+        dtype="float64",
     )
-    return dataset.load()
+    container = dataset.load()
+    # coco-pipe numbers the events itself (see meta["event_id"]); restore our codes.
+    names = {code: name for name, code in container.meta["event_id"].items()}
+    return container.replace(
+        y=np.asarray([event_id[names[code]] for code in container.y]),
+        meta={**container.meta, "event_id": event_id},
+    )
 
 
 def format_pair_keys(

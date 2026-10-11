@@ -113,9 +113,12 @@ def run_nonlinear_analysis(
     analysis_mask = (full_times >= ANALYSIS_WINDOW[0] - 1e-8) & (
         full_times <= ANALYSIS_WINDOW[1] + 1e-8
     )
-    sensor = sensor.isel(time=analysis_mask).zscore(
-        dim=("obs", "time"), eps=1e-5
-    )
+    sensor = sensor.isel(time=analysis_mask)
+    # Z-score each channel across trials and time.
+    X = np.asarray(sensor.X)
+    mean = X.mean(axis=(0, 2), keepdims=True)
+    std = X.std(axis=(0, 2), keepdims=True)
+    sensor = sensor.replace(X=(X - mean) / (std + 1e-5))
 
     all_subjects = np.asarray(sensor.coords["subject"]).astype(str)
     all_labels = np.asarray(sensor.y).astype(int)
