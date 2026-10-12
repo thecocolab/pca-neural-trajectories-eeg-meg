@@ -531,7 +531,6 @@ def _load_wakeman_henson_container(
         resolved = [str(s).removeprefix("sub-") for s in subjects]
     resolved = sorted(resolved)
 
-    event_id = {BIDS_NAMES[c]: c for c in selected}
     dataset = BIDSDataset(
         root=Path(derivatives_root),
         task=TASK,
@@ -539,17 +538,11 @@ def _load_wakeman_henson_container(
         datatype=DATATYPE,
         suffix="epo",
         mode="load_existing",
-        event_id=event_id,
+        event_id={BIDS_NAMES[c]: c for c in selected},
         subjects=resolved,
         dtype="float64",
     )
     container = dataset.load()
-    # coco-pipe numbers the events itself (see meta["event_id"]); restore our codes.
-    names = {code: name for name, code in container.meta["event_id"].items()}
-    container = container.replace(
-        y=np.asarray([event_id[names[code]] for code in container.y]),
-        meta={**container.meta, "event_id": event_id},
-    )
 
     if vectorview_selections is not None:
         import mne

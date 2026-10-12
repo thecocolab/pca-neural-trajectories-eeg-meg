@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "autoreject>=0.4",
-    "coco-pipe[eeg,decoding,neighbor]>=0.0.2",
+    "coco-pipe[eeg,decoding,neighbor]>=0.0.3",
     "ipywidgets",
     "jupyterlab",
     "kaleido",

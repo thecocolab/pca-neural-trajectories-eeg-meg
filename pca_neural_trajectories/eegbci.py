@@ -305,13 +305,7 @@ def load_eegbci_container(
         baseline=baseline,
         dtype="float64",
     )
-    container = dataset.load()
-    # coco-pipe numbers the events itself (see meta["event_id"]); restore our codes.
-    names = {code: name for name, code in container.meta["event_id"].items()}
-    return container.replace(
-        y=np.asarray([event_id[names[code]] for code in container.y]),
-        meta={**container.meta, "event_id": event_id},
-    )
+    return dataset.load()
 
 
 def format_pair_keys(
