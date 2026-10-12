@@ -266,9 +266,13 @@ def save_separation_speed_figure(
     return data
 
 
+# Recorded at 128 Hz instead of 160 Hz, so their epochs cannot be stacked.
+EXCLUDED_SUBJECTS = {88, 92, 100}
+
+
 def _resolve_subjects(spec: list[int] | None) -> list[int]:
     if spec is None or not spec:
-        return list(range(1, 110))
+        return [s for s in range(1, 110) if s not in EXCLUDED_SUBJECTS]
     return [int(s) for s in spec]
 
 
@@ -283,6 +287,7 @@ def run_main_analysis(
     force_reconvert: bool = False,
     clean_artifacts: bool = True,
     n_ica_components: int = 20,
+    prepare: bool = True,
 ) -> dict:
     """Run the main 10-step PCA-trajectory workflow across the full cohort.
 
@@ -302,14 +307,15 @@ def run_main_analysis(
     # Step 1: represent each state in the 64-channel EEG sensor space.
     # Step 2: run the same cleaning, loading, crop, and normalization as the
     # notebook. Only the number of requested subjects differs.
-    setup_data_bids(
-        subjects=subject_list,
-        runs=list(range(3, 15)),
-        root=bids_root,
-        force_reconvert=force_reconvert,
-        clean_artifacts=clean_artifacts,
-        n_ica_components=n_ica_components,
-    )
+    if prepare:
+        setup_data_bids(
+            subjects=subject_list,
+            runs=list(range(3, 15)),
+            root=bids_root,
+            force_reconvert=force_reconvert,
+            clean_artifacts=clean_artifacts,
+            n_ica_components=n_ica_components,
+        )
 
     container = load_eegbci_container(
         bids_root,
@@ -325,9 +331,12 @@ def run_main_analysis(
     time_mask = (times_full >= analysis_window[0] - 1e-8) & (
         times_full <= analysis_window[1] + 1e-8
     )
-    container = container.isel(time=time_mask).zscore(
-        dim=("obs", "time"), eps=1e-5
-    )
+    container = container.isel(time=time_mask)
+    # Z-score each channel across trials and time.
+    X = np.asarray(container.X)
+    mean = X.mean(axis=(0, 2), keepdims=True)
+    std = X.std(axis=(0, 2), keepdims=True)
+    container = container.replace(X=(X - mean) / (std + 1e-5))
     times = np.asarray(container.coords["time"])
     subject_ids = np.asarray(container.coords["subject"])
     trial_labels = np.asarray(container.y).astype(int)
@@ -349,11 +358,12 @@ def run_main_analysis(
     )
     container_plot_erp = container.aggregate(by=plot_groups, stats="mean")
     aggregate_keys = np.asarray(container_plot_erp.coords["obs"]).astype(str)
-    container_plot_erp.y = np.asarray(
-        [int(key.split("|")[1]) for key in aggregate_keys]
-    )
-    container_plot_erp.coords["subject"] = np.asarray(
-        [key.split("|")[0] for key in aggregate_keys]
+    container_plot_erp = container_plot_erp.replace(
+        y=np.asarray([int(key.split("|")[1]) for key in aggregate_keys]),
+        coords={
+            **container_plot_erp.coords,
+            "subject": np.asarray([key.split("|")[0] for key in aggregate_keys]),
+        },
     )
 
     container_plot_pooled_trials = container.stack(
@@ -443,10 +453,12 @@ def run_main_analysis(
         new_dim_name="component",
     )
     container_traj_erp = container_pc_erp.unstack("obs")
-    container_traj_trials.X = _baseline_scores(
-        container_traj_trials.X, times, pc_names
+    container_traj_trials = container_traj_trials.replace(
+        X=_baseline_scores(container_traj_trials.X, times, pc_names)
     )
-    container_traj_erp.X = _baseline_scores(container_traj_erp.X, times, pc_names)
+    container_traj_erp = container_traj_erp.replace(
+        X=_baseline_scores(container_traj_erp.X, times, pc_names)
+    )
 
     # --------------------------------------------------------------------- Step 7
     container_traj_trials_agg = container_traj_trials.aggregate(
@@ -1314,7 +1326,7 @@ def main(argv: list[str] | None = None) -> None:
         type=int,
         nargs="*",
         default=None,
-        help="Subject IDs (default: 1..109).",
+        help="Subject IDs (default: the 106 usable participants of 1..109).",
     )
     parser.add_argument(
         "--output",
@@ -1343,6 +1355,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Skip ICA artifact removal, for a raw-baseline comparison.",
     )
     parser.add_argument("--n-ica-components", type=int, default=20)
+    parser.add_argument(
+        "--skip-prepare",
+        action="store_true",
+        help="Load an existing BIDS conversion without running setup_data_bids.",
+    )
     parser.add_argument(
         "--smoke",
         action="store_true",
@@ -1396,6 +1413,7 @@ def _run(args: argparse.Namespace, subjects: list[int] | None, n_perm: int) -> d
         force_reconvert=args.force_reconvert,
         clean_artifacts=args.clean_artifacts,
         n_ica_components=args.n_ica_components,
+        prepare=not args.skip_prepare,
     )
 
 

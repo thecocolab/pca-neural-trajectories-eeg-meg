@@ -1107,7 +1107,6 @@ def run_decoding_analysis(
         result.export(
             results_dir / _slug(representation),
             config=config.model_dump(),
-            formats=("csv",),
         )
 
     temporal_scores = pd.concat(temporal_frames, ignore_index=True)
