@@ -305,7 +305,11 @@ def load_eegbci_container(
         baseline=baseline,
         dtype="float64",
     )
-    return dataset.load()
+    container = dataset.load()
+    # coco-pipe adds tmin to each sample offset, which leaves float error
+    # (0.6000000000000001 s); round so that window edges keep their last sample.
+    times = np.round(np.asarray(container.coords["time"]), 6)
+    return container.replace(coords={**container.coords, "time": times})
 
 
 def format_pair_keys(

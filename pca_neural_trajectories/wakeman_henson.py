@@ -543,6 +543,10 @@ def _load_wakeman_henson_container(
         dtype="float64",
     )
     container = dataset.load()
+    # coco-pipe adds tmin to each sample offset, which leaves float error
+    # (0.6000000000000001 s); round so that window edges keep their last sample.
+    times = np.round(np.asarray(container.coords["time"]), 6)
+    container = container.replace(coords={**container.coords, "time": times})
 
     if vectorview_selections is not None:
         import mne
