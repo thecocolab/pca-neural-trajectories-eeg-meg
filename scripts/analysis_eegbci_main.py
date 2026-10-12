@@ -283,6 +283,7 @@ def run_main_analysis(
     force_reconvert: bool = False,
     clean_artifacts: bool = True,
     n_ica_components: int = 20,
+    prepare: bool = True,
 ) -> dict:
     """Run the main 10-step PCA-trajectory workflow across the full cohort.
 
@@ -302,14 +303,15 @@ def run_main_analysis(
     # Step 1: represent each state in the 64-channel EEG sensor space.
     # Step 2: run the same cleaning, loading, crop, and normalization as the
     # notebook. Only the number of requested subjects differs.
-    setup_data_bids(
-        subjects=subject_list,
-        runs=list(range(3, 15)),
-        root=bids_root,
-        force_reconvert=force_reconvert,
-        clean_artifacts=clean_artifacts,
-        n_ica_components=n_ica_components,
-    )
+    if prepare:
+        setup_data_bids(
+            subjects=subject_list,
+            runs=list(range(3, 15)),
+            root=bids_root,
+            force_reconvert=force_reconvert,
+            clean_artifacts=clean_artifacts,
+            n_ica_components=n_ica_components,
+        )
 
     container = load_eegbci_container(
         bids_root,
@@ -1350,6 +1352,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--n-ica-components", type=int, default=20)
     parser.add_argument(
+        "--skip-prepare",
+        action="store_true",
+        help="Load an existing BIDS conversion without running setup_data_bids.",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="Fast check: one subject and at most 10 permutations.",
@@ -1402,6 +1409,7 @@ def _run(args: argparse.Namespace, subjects: list[int] | None, n_perm: int) -> d
         force_reconvert=args.force_reconvert,
         clean_artifacts=args.clean_artifacts,
         n_ica_components=args.n_ica_components,
+        prepare=not args.skip_prepare,
     )
 
 
