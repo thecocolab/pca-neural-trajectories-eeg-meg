@@ -94,9 +94,8 @@ python scripts/analysis_eegbci_decoding.py
 ```
 
 `analysis_eegbci_main.py` skips a run that already finished; pass `--no-resume` to
-redo it. It also writes `separation_speed.{svg,png,csv}`. The sample size in a report
-is the number of participants that actually loaded, which can be lower than what you
-asked for (106 of 109 for the full cohort).
+redo it. It also writes `separation_speed.{svg,png,csv}`. The full cohort is 106 of the
+109 participants: 88, 92 and 100 were recorded at another sampling rate and are left out.
 
 ### MEG
 

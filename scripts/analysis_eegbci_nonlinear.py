@@ -58,6 +58,8 @@ CONDITIONS = (3, 4, 5, 6)
 ANALYSIS_WINDOW = (-0.2, 1.0)
 NEIGHBORHOODS = (10, 20, 40)
 METHODS = ("PCA", "UMAP", "PHATE", "Isomap")
+# Recorded at 128 Hz instead of 160 Hz, so their epochs cannot be stacked.
+EXCLUDED_SUBJECTS = {88, 92, 100}
 CONDITION_COLORS = {
     3: "#0072B2",
     4: "#D55E00",
@@ -940,8 +942,8 @@ def main(argv: list[str] | None = None) -> None:
         "--subjects",
         nargs="*",
         type=int,
-        default=list(range(1, 110)),
-        help="Subject IDs (default: 1..109; unusable recordings are dropped on load).",
+        default=[s for s in range(1, 110) if s not in EXCLUDED_SUBJECTS],
+        help="Subject IDs (default: the 106 usable participants of 1..109).",
     )
     parser.add_argument("--bids-root", type=Path, default=Path("PhysioNet_EEGBCI/BIDS"))
     parser.add_argument(

@@ -266,9 +266,13 @@ def save_separation_speed_figure(
     return data
 
 
+# Recorded at 128 Hz instead of 160 Hz, so their epochs cannot be stacked.
+EXCLUDED_SUBJECTS = {88, 92, 100}
+
+
 def _resolve_subjects(spec: list[int] | None) -> list[int]:
     if spec is None or not spec:
-        return list(range(1, 110))
+        return [s for s in range(1, 110) if s not in EXCLUDED_SUBJECTS]
     return [int(s) for s in spec]
 
 
@@ -1322,7 +1326,7 @@ def main(argv: list[str] | None = None) -> None:
         type=int,
         nargs="*",
         default=None,
-        help="Subject IDs (default: 1..109).",
+        help="Subject IDs (default: the 106 usable participants of 1..109).",
     )
     parser.add_argument(
         "--output",
